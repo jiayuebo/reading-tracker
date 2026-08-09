@@ -3,12 +3,42 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reading Tracker</title>
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<title>Reading &amp; study tracker</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>&#9634;</text></svg>">
 </head>
 <body>
-<h1>Reading Tracker</h1>
-<p>Deploy check. If you can read this, GitHub Pages is serving from <code>main</code>.</p>
-<p>Build: <code id="stamp">hello-world-1</code></p>
-<p>Non-ASCII render check: Salmón · Stojnić · Begriffsschrift · em—dash · Møller</p>
+
+<a class="skip" href="#view">Skip to content</a>
+
+<header class="topbar">
+  <div class="bar">
+    <a class="wordmark" href="#/queue">
+      <span class="mark" aria-hidden="true">§</span>
+      <span>Reading &amp; study</span>
+    </a>
+    <nav id="nav" aria-label="Views"></nav>
+    <div id="sync-status" class="sync" aria-live="polite"></div>
+  </div>
+</header>
+
+<div id="banner" aria-live="polite"></div>
+
+<main id="view" tabindex="-1"></main>
+
+<footer class="foot">
+  <p>
+    Data lives in a private repository and is fetched at runtime; this page holds none of it.
+    <a href="#/settings">Settings</a> · press <kbd>?</kbd> for keyboard shortcuts.
+  </p>
+</footer>
+
+<noscript>
+  <p style="padding:2rem">This tracker is a JavaScript application. It needs scripting enabled to fetch your data.</p>
+</noscript>
+
+<script type="module" src="js/app.js"></script>
 </body>
 </html>
