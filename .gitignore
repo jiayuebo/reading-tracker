@@ -1,0 +1,6 @@
+# This repo is PUBLIC. Reading data lives in the private reading-data repo.
+# Never commit the data file here, under any name.
+data.json
+data*.json
+*.data.json
+/scratch/
