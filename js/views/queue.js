@@ -294,6 +294,13 @@ function renderNode(node, ctx, depth) {
 function makeDraggable(el, t, drag) {
   if (!drag || !drag.enabled) return el;
   el.draggable = true;
+
+  // An <a href> is draggable by default, and the title link is the obvious
+  // place to grab a row. Without this the browser starts a *link* drag from
+  // the anchor instead of a row drag, which looks exactly like "dragging does
+  // not work". Opting the anchor out lets the row's own draggable win; the
+  // link still clicks normally.
+  el.querySelectorAll('a').forEach(a => { a.draggable = false; });
   el.addEventListener('dragstart', (e) => {
     e.dataTransfer.setData('text/plain', t.id);
     e.dataTransfer.effectAllowed = 'move';
@@ -379,6 +386,9 @@ function row(t, { cols, prefs, byId, children, drag }, depth = 0, childCount = 0
     t.type !== 'article' ? t.type : null].filter(Boolean);
 
   return makeDraggable(h('div.row', { dataset: { id: t.id } },
+    drag && drag.enabled
+      ? h('span.drag-handle', { 'aria-hidden': 'true', title: 'Drag onto another row to nest it' }, '\u283F')
+      : null,
     h('a.row-main', { href: `#/text/${encodeURIComponent(t.id)}` },
       h('span.title', t.title || '(untitled)'),
       meta.length ? h('span.meta', meta.join(' · ')) : null,

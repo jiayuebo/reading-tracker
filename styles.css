@@ -370,16 +370,30 @@ a.group-head:hover .group-title { color: var(--ink); text-decoration: underline;
 
 /* ── drag to nest ────────────────────────────────────────────────── */
 
-.row[draggable="true"] { cursor: grab; }
-.row.dragging { opacity: .4; cursor: grabbing; }
+.row { position: relative; }
+.row[draggable="true"] { padding-left: 1.15rem; }
+.drag-handle {
+  position: absolute; left: -.05rem; top: .5rem;
+  color: var(--rule-2); font-size: .82rem; line-height: 1;
+  cursor: grab; opacity: 0; transition: opacity .12s ease; user-select: none;
+}
+.row:hover .drag-handle, .row:focus-within .drag-handle { opacity: 1; }
+.drag-handle:active { cursor: grabbing; }
+.row.dragging { opacity: .4; }
 .row.drop-into {
   background: var(--accent-soft);
   box-shadow: inset 3px 0 0 var(--accent);
 }
+/* Fixed, not in the flow. A drop zone that appears in the document the instant
+   a drag starts pushes every row below it down, moving the intended target out
+   from under the cursor mid-gesture. */
 .unnest-zone {
-  display: none; margin: .6rem 0; padding: .6rem .8rem;
+  display: none;
+  position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%);
+  z-index: 40; padding: .6rem 1.1rem; max-width: 90vw;
   border: 1px dashed var(--rule-2); border-radius: var(--r);
-  color: var(--ink-3); font-size: .82rem; text-align: center;
+  background: var(--surface); box-shadow: 0 6px 20px rgb(0 0 0 / .16);
+  color: var(--ink-2); font-size: .82rem; text-align: center;
 }
 body.row-dragging .unnest-zone { display: block; }
 .unnest-zone.drop-into {
