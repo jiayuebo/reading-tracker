@@ -9,6 +9,7 @@ import {
 } from '../model.js';
 import { lookupPanel, lookupEnabled } from './lookup-ui.js';
 import { applyCandidate, describe } from '../lookup.js';
+import { rowPicker } from './row-picker.js';
 
 export function renderDetail(root, ctx, id) {
   const doc = state.doc;
@@ -81,13 +82,27 @@ export function renderDetail(root, ctx, id) {
       })),
       field('Type', selectEl(TYPES.map(x => [x, x]), t.type, v => set({ type: v })),
         'Unknown rows were imported as “book”; correct it here.'),
-      field('Container (free text)', h('input', {
-        type: 'text', value: t.container || '', placeholder: 'e.g. Beyond Concepts',
-        onchange: e => set({ container: e.target.value.trim() || null }),
-      })),
-      field('Parent row', parentSelect(t, texts, children, v => set({ parent_id: v || null })),
-        'Links this row to a container row that exists in the file.'),
+      field('Journal or publication', h('input', {
+        type: 'text', value: t.journal || '', placeholder: 'e.g. Nous',
+        onchange: e => set({ journal: e.target.value.trim() || null }),
+      }), 'Where it appeared. Shown for reference; never used for nesting.'),
     ]),
+
+    h('section.card',
+      h('h2', 'Parent'),
+      h('div.field.wide',
+        h('label', { for: 'parent-picker' }, 'Nest this under'),
+        parentPicker(t, texts, children, set),
+        h('p.hint', 'Start typing a title. You can also drag a row onto another in the queue.')),
+      t.parent_id ? null : h('div.field.wide',
+        h('label', { for: 'f-parent-title-unlinked' }, 'Parent title, not linked'),
+        h('input#f-parent-title-unlinked', {
+          type: 'text', value: t.container || '', placeholder: 'e.g. Critique of Pure Reason',
+          onchange: e => set({ container: e.target.value.trim() || null }),
+        }),
+        h('p.hint', 'Only for a parent that has no record of its own. The queue groups by this '
+          + 'string until you link a real row above, which takes precedence.')),
+    ),
 
     section('State', [
       field('Status', selectEl(STATUSES.map(x => [x, STATUS_LABEL[x]]), t.status, v => set({ status: v }))),
@@ -274,13 +289,16 @@ function selectEl(options, value, onchange) {
  * a cycle would hang the queue renderer, so it is prevented at entry rather
  * than defended against on every read.
  */
-function parentSelect(t, texts, children, onchange) {
+function parentPicker(t, texts, children, set) {
   const banned = descendantIds(t.id, children);
   banned.add(t.id);
-  const candidates = texts
-    .filter(x => !banned.has(x.id))
-    .sort((a, b) => sortKeyTitle(a).localeCompare(sortKeyTitle(b)));
-  return selectEl([['', '— none —'], ...candidates.map(c => [c.id, c.title || c.id])], t.parent_id || '', onchange);
+  return rowPicker({
+    texts,
+    value: t.parent_id || null,
+    banned,
+    placeholder: 'Type a book or article title...',
+    onChange: (id) => set({ parent_id: id || null }),
+  });
 }
 
 function dateInput(value, onchange) {

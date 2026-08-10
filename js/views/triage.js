@@ -7,7 +7,8 @@
 
 import { h, mount } from '../dom.js';
 import { state, mutate } from '../store.js';
-import { childIndex, fold, sortKeyTitle, todayISO } from '../model.js';
+import { childIndex, descendantIds, fold, sortKeyTitle, todayISO } from '../model.js';
+import { rowPicker } from './row-picker.js';
 
 // Drafts survive the re-render that each resolution triggers.
 const drafts = new Map();
@@ -17,9 +18,8 @@ export function renderTriage(root, ctx) {
   const texts = doc.texts || [];
   const rows = texts.filter(t => t.status === 'triage');
   const children = childIndex(texts);
-  const containers = texts
-    .filter(x => (children.get(x.id) || []).length > 0 || x.type === 'book')
-    .sort((a, b) => sortKeyTitle(a).localeCompare(sortKeyTitle(b)));
+  // Any row can be a parent, so offer them all and let the picker filter.
+  const containers = texts.slice().sort((a, b) => sortKeyTitle(a).localeCompare(sortKeyTitle(b)));
 
   mount(root,
     h('header.view-head',
@@ -30,13 +30,13 @@ export function renderTriage(root, ctx) {
     ),
 
     rows.length ? h('p.notice.quiet',
-      'Each of these was a completed Google Task whose parent title was lost. The syllabi have been checked and will not resolve more of them — this is a manual pass. Give it a container, correct the title if you want, and send it where it belongs.',
+      'Each of these was a completed Google Task whose parent title was lost. The syllabi have been checked and will not resolve more of them — this is a manual pass. Give it a parent, correct the title if you want, and send it where it belongs.',
     ) : null,
 
     rows.length
-      ? h('div.triage-list', rows.map(t => card(t, { containers, ctx })))
+      ? h('div.triage-list', rows.map(t => card(t, { containers, ctx: { ...ctx, children } })))
       : h('div.empty',
-        h('p', 'Triage is clear. Every row has a container and a home.'),
+        h('p', 'Triage is clear. Every row has a parent and a home.'),
         h('a.button', { href: '#/queue' }, 'Back to the queue')),
   );
 }
@@ -58,17 +58,17 @@ function card(t, { containers, ctx }) {
   const d = draftFor(t);
 
   const containerInput = h('input', {
-    type: 'text', value: d.container, placeholder: 'Container title',
-    'aria-label': 'Container',
+    type: 'text', value: d.container, placeholder: 'Parent title',
+    'aria-label': 'Parent title, not linked',
     oninput: e => { d.container = e.target.value; },
   });
-  const parentSel = h('select', {
-    'aria-label': 'Parent row',
-    onchange: e => { d.parent_id = e.target.value; },
-  },
-    h('option', { value: '' }, '— no parent row —'),
-    containers.map(c => h('option', { value: c.id, selected: c.id === d.parent_id }, c.title || c.id)),
-  );
+  const banned = descendantIds(t.id, ctx.children);
+  banned.add(t.id);
+  let picker = rowPicker({
+    texts: containers, value: d.parent_id || null, banned,
+    placeholder: 'Type to find the parent row...',
+    onChange: (id) => { d.parent_id = id || ''; },
+  });
   const titleInput = h('input.triage-title', {
     type: 'text', value: d.title, 'aria-label': 'Title',
     oninput: e => { d.title = e.target.value; },
@@ -78,7 +78,17 @@ function card(t, { containers, ctx }) {
     d.container = cand;
     containerInput.value = cand;
     const match = matchContainer(cand, containers);
-    if (match) { d.parent_id = match.id; parentSel.value = match.id; }
+    if (match) {
+      d.parent_id = match.id;
+      // The picker holds its own DOM state, so re-make it rather than poking it.
+      const fresh = rowPicker({
+        texts: containers, value: match.id, banned,
+        placeholder: 'Type to find the parent row...',
+        onChange: (id) => { d.parent_id = id || ''; },
+      });
+      picker.replaceWith(fresh);
+      picker = fresh;
+    }
     containerInput.focus();
   };
 
@@ -118,11 +128,11 @@ function card(t, { containers, ctx }) {
         h('div.cand-buttons', cands.map((c, i) =>
           h('button.cand', { onclick: () => pick(c), title: c },
             h('kbd', String(i + 1)), ' ', c))))
-      : h('p.dim.small', 'No container candidates were captured for this row.'),
+      : h('p.dim.small', 'No parent candidates were captured for this row.'),
 
     h('div.triage-fields',
-      h('label', h('span', 'Container'), containerInput),
-      h('label', h('span', 'Parent row'), parentSel),
+      h('label', h('span', 'Parent row'), picker),
+      h('label', h('span', 'Parent title, if it has no row'), containerInput),
     ),
 
     h('div.triage-actions',

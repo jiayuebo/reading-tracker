@@ -79,13 +79,23 @@ function fromCrossref(w) {
     .map(a => [a.given, a.family].filter(Boolean).join(' ').trim() || a.name)
     .filter(Boolean);
   const parts = w.issued && w.issued['date-parts'] && w.issued['date-parts'][0];
+  const type = CROSSREF_TYPE[w.type] || 'article';
+  const containerTitle = (w['container-title'] && w['container-title'][0]) || null;
+
+  // Crossref returns one `container-title` for everything, but it means two
+  // different things. For a book chapter it is the book — a genuine parent. For
+  // a journal article it is the journal, which is not a parent in any sense:
+  // nesting an article under "Nous" groups by venue, which is exactly what this
+  // tracker does not care about. Route it by type.
+  const isPartOfBook = type === 'chapter' || type === 'section';
   return {
     source: 'Crossref',
     title: (w.title && w.title[0]) || '',
     authors,
     year: parts && parts[0] ? Number(parts[0]) : null,
-    type: CROSSREF_TYPE[w.type] || 'article',
-    container: (w['container-title'] && w['container-title'][0]) || null,
+    type,
+    container: isPartOfBook ? containerTitle : null,
+    journal: isPartOfBook ? null : containerTitle,
     pages: pageCount(w.page),
     doi: w.DOI || null,
     publisher: w.publisher || null,
@@ -100,6 +110,7 @@ function fromOpenLibrary(rec, isbn) {
     year: (String(rec.publish_date || '').match(/\d{4}/) || [null])[0] ? Number(String(rec.publish_date).match(/\d{4}/)[0]) : null,
     type: 'book',
     container: null,
+    journal: null,
     pages: rec.number_of_pages || null,
     isbn,
     publisher: (rec.publishers && rec.publishers[0] && rec.publishers[0].name) || null,
@@ -178,6 +189,7 @@ export function applyCandidate(row, c, { overwrite = false } = {}) {
   put('year', c.year);
   put('pages', c.pages);
   put('container', c.container);
+  put('journal', c.journal);
   if (c.doi) put('doi', c.doi);
   if (c.isbn) put('isbn', c.isbn);
   // `type` is the field the import got wrong most often, so it is the one field
@@ -200,7 +212,7 @@ export function describe(c) {
     bits.push(c.authors.length > 2 ? `${c.authors[0]} et al.` : c.authors.join(' & '));
   }
   if (c.year) bits.push(String(c.year));
-  if (c.container) bits.push(c.container);
+  if (c.journal || c.container) bits.push(c.journal || c.container);
   if (c.type) bits.push(c.type);
   return bits.join(' · ');
 }

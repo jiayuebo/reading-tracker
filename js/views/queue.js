@@ -15,14 +15,14 @@
 //    best-ranked member. Hierarchy clusters the list; it never reorders it.
 
 import { h, mount } from '../dom.js';
-import { state, savePrefs } from '../store.js';
+import { state, savePrefs, mutate } from '../store.js';
 import {
-  childIndex, byIdIndex, containerName, unreadPrerequisites, groupKey, MAX_DEPTH,
+  childIndex, byIdIndex, containerName, unreadPrerequisites, groupKey, MAX_DEPTH, descendantIds,
   authorLine, priority, isScored, scores, sortKeyTitle, fold,
 } from '../model.js';
 
 const SCOPES = {
-  active: { label: 'Active', test: t => t.status === 'queued' || t.status === 'reading' },
+  active: { label: 'Queued + reading', test: t => t.status === 'queued' || t.status === 'reading' },
   queued: { label: 'Queued', test: t => t.status === 'queued' },
   reading: { label: 'Reading', test: t => t.status === 'reading' },
   read: { label: 'Read', test: t => t.status === 'read' },
@@ -56,6 +56,7 @@ export function renderQueue(root, ctx) {
   const triageCount = texts.filter(t => t.status === 'triage').length;
   const inScopeTotal = texts.filter(SCOPES[scope].test).length;
 
+  const drag = { byId, children, enabled: prefs.group !== false };
   const forest = prefs.group === false ? null : buildForest(ordered, byId, children);
   const leafCount = forest ? countLeaves(forest) : ordered.length;
   const groupCount = forest ? forest.filter(n => n.children.length).length : 0;
@@ -81,11 +82,13 @@ export function renderQueue(root, ctx) {
 
     anyScored ? sliders(prefs) : null,
 
+    prefs.group !== false ? unnestZone() : null,
+
     ordered.length
       ? (forest
-        ? h('ol.rows', { role: 'list' }, forest.map(n => renderNode(n, { cols, prefs, byId, children }, 0)))
+        ? h('ol.rows', { role: 'list' }, forest.map(n => renderNode(n, { cols, prefs, byId, children, drag }, 0)))
         : h('ol.rows', { role: 'list' },
-          ordered.map(t => h('li.group', row(t, { cols, prefs, byId, children }, 0)))))
+          ordered.map(t => h('li.group', row(t, { cols, prefs, byId, children, drag }, 0)))))
       : emptyState(f, scope, inScopeTotal, ctx),
   );
 }
@@ -279,16 +282,103 @@ function renderNode(node, ctx, depth) {
 
 // ── row ─────────────────────────────────────────────────────────────
 
-function row(t, { cols, prefs, byId, children }, depth = 0, childCount = 0) {
+/**
+ * Drag a row onto another to nest it there; drop it on the zone above the list
+ * to bring it back to the top level.
+ *
+ * Dragging is a pointer gesture: no keyboard can perform it, and HTML5 drag and
+ * drop does not fire on touch at all. So this is an accelerator, never the only
+ * route — the parent picker on the detail view does the same job, and is the one
+ * that works on a phone.
+ */
+function makeDraggable(el, t, drag) {
+  if (!drag || !drag.enabled) return el;
+  el.draggable = true;
+  el.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/plain', t.id);
+    e.dataTransfer.effectAllowed = 'move';
+    el.classList.add('dragging');
+    document.body.classList.add('row-dragging');
+  });
+  el.addEventListener('dragend', () => {
+    el.classList.remove('dragging');
+    document.body.classList.remove('row-dragging');
+    document.querySelectorAll('.drop-into').forEach(n => n.classList.remove('drop-into'));
+  });
+
+  const wouldCycle = (draggedId) =>
+    draggedId === t.id || descendantIds(draggedId, drag.children).has(t.id);
+
+  el.addEventListener('dragover', (e) => {
+    const id = dragPayload(e);
+    if (!id || wouldCycle(id)) return;   // no preventDefault => cursor shows "not allowed"
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    el.classList.add('drop-into');
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('drop-into'));
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    el.classList.remove('drop-into');
+    const id = e.dataTransfer.getData('text/plain');
+    if (!id || wouldCycle(id)) return;
+    mutate(d => {
+      const row = d.texts.find(x => x.id === id);
+      if (!row) return;
+      row.parent_id = t.id;
+      // A linked parent wins over the free-text one, so stale text would only
+      // ever be confusing. See the note on `container` in the data model.
+      if (row.container) row.container = null;
+    });
+  });
+  return el;
+}
+
+/**
+ * During a drag the payload is unreadable in dragover on most engines, so the
+ * id is stashed alongside. It is only used to reject invalid targets early.
+ */
+let draggingId = null;
+document.addEventListener('dragstart', (e) => {
+  const el = e.target.closest && e.target.closest('.row');
+  draggingId = el ? el.dataset.id : null;
+});
+document.addEventListener('dragend', () => { draggingId = null; });
+function dragPayload() { return draggingId; }
+
+function unnestZone() {
+  const zone = h('div.unnest-zone', 'Drop here to move a row back to the top level');
+  zone.addEventListener('dragover', (e) => {
+    if (!draggingId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    zone.classList.add('drop-into');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drop-into'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('drop-into');
+    const id = e.dataTransfer.getData('text/plain');
+    if (!id) return;
+    mutate(d => {
+      const row = d.texts.find(x => x.id === id);
+      if (row) { row.parent_id = null; row.container = null; }
+    });
+  });
+  return zone;
+}
+
+function row(t, { cols, prefs, byId, children, drag }, depth = 0, childCount = 0) {
   const s = scores(t);
   const p = priority(t, prefs.w, prefs.alpha);
   const author = authorLine(t);
   const blocked = unreadPrerequisites(t, byId);
   const cont = depth === 0 ? containerName(t, byId) : null;
 
-  const meta = [author, t.year || null, t.type !== 'article' ? t.type : null].filter(Boolean);
+  const meta = [author, t.year || null, t.journal || null,
+    t.type !== 'article' ? t.type : null].filter(Boolean);
 
-  return h('div.row', { dataset: { id: t.id } },
+  return makeDraggable(h('div.row', { dataset: { id: t.id } },
     h('a.row-main', { href: `#/text/${encodeURIComponent(t.id)}` },
       h('span.title', t.title || '(untitled)'),
       meta.length ? h('span.meta', meta.join(' · ')) : null,
@@ -317,7 +407,7 @@ function row(t, { cols, prefs, byId, children }, depth = 0, childCount = 0) {
       cols.est ? num(t.est_hours == null ? '' : `${t.est_hours}h`) : null,
       h('span.date.tabular', t.date_added || ''),
     ),
-  );
+  ), t, drag);
 }
 
 function num(v, cls) {
@@ -332,15 +422,22 @@ function controls(prefs, scope, doc, ctx) {
   const f = prefs.filters;
   const setF = patch => savePrefs({ filters: { ...f, ...patch } });
   const projects = doc.projects || [];
-  const types = [...new Set((doc.texts || []).map(t => t.type))].sort();
+  const texts = doc.texts || [];
+  const types = [...new Set(texts.map(t => t.type))].sort();
+
+  // Counts in the labels, because "Active" and "Queued" are indistinguishable
+  // until something is actually being read, and a menu that looks like it has
+  // two names for one thing is worse than a longer label.
+  const scopeOptions = Object.entries(SCOPES).map(([k, v]) =>
+    [k, `${v.label} ${texts.filter(v.test).length}`]);
 
   return h('div.controls',
     h('input.search', {
-      type: 'search', id: 'q', placeholder: 'Search title, author, container…',
+      type: 'search', id: 'q', placeholder: 'Search title, author, parent…',
       value: f.q, 'aria-label': 'Search',
       oninput: e => setF({ q: e.target.value }),
     }),
-    select('Show', scope, Object.entries(SCOPES).map(([k, v]) => [k, v.label]), v => setF({ status: v })),
+    select('Show', scope, scopeOptions, v => setF({ status: v })),
     select('Sort', prefs.sort, Object.entries(SORTS), v => savePrefs({ sort: v })),
     types.length > 1
       ? select('Type', f.type, [['', 'Any type'], ...types.map(t => [t, t])], v => setF({ type: v }))

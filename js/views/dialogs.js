@@ -97,6 +97,7 @@ export function newTextDialog(ctx) {
     if (c.type) type.value = c.type;
     extra = {};
     if (c.container) extra.container = c.container;
+    if (c.journal) extra.journal = c.journal;
     if (c.pages) extra.pages = c.pages;
     if (c.doi) extra.doi = c.doi;
     if (c.isbn) extra.isbn = c.isbn;
