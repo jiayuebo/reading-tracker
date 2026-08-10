@@ -3,7 +3,8 @@
 
 import { h } from '../dom.js';
 import { state, mutate, serialize, resolveConflictTakeRemote, resolveConflictForceLocal, save } from '../store.js';
-import { newText, slugify, uniqueId, todayISO } from '../model.js';
+import { newText, slugify, uniqueId, todayISO, TYPES } from '../model.js';
+import { lookupPanel } from './lookup-ui.js';
 
 /**
  * Not all engines fire `close` when close() is called from script rather than
@@ -79,22 +80,41 @@ export function quickLog(ctx) {
   return dlg;
 }
 
-/** New queued text. */
+/** New queued text, with optional metadata lookup. */
 export function newTextDialog(ctx) {
   const title = h('input', { type: 'text', required: true, placeholder: 'Title', 'aria-label': 'Title' });
-  const author = h('input', { type: 'text', placeholder: 'Author (optional)', 'aria-label': 'Author' });
-  const type = h('select', { 'aria-label': 'Type' },
-    ['article', 'chapter', 'book', 'section', 'collection'].map(t => h('option', { value: t }, t)));
+  const author = h('input', { type: 'text', placeholder: 'Authors, comma separated', 'aria-label': 'Authors' });
+  const year = h('input', { type: 'number', min: 0, max: 3000, placeholder: 'Year', 'aria-label': 'Year' });
+  const type = h('select', { 'aria-label': 'Type' }, TYPES.map(t => h('option', { value: t }, t)));
+
+  // Anything the lookup knows that the four visible fields cannot hold.
+  let extra = {};
+
+  const panel = lookupPanel((c) => {
+    title.value = c.title || title.value;
+    if (c.authors && c.authors.length) author.value = c.authors.join(', ');
+    if (c.year) year.value = c.year;
+    if (c.type) type.value = c.type;
+    extra = {};
+    if (c.container) extra.container = c.container;
+    if (c.pages) extra.pages = c.pages;
+    if (c.doi) extra.doi = c.doi;
+    if (c.isbn) extra.isbn = c.isbn;
+    title.focus();
+  });
 
   const submit = () => {
     const v = title.value.trim();
     if (!v) { title.focus(); return; }
     const row = addText({
       title: v,
-      authors: author.value.trim() ? [author.value.trim()] : [],
+      authors: author.value.split(',').map(x => x.trim()).filter(Boolean),
+      year: year.value ? Number(year.value) : null,
       type: type.value,
       status: 'queued',
       source: 'queue',
+      container: extra.container || null,
+      extra: Object.fromEntries(Object.entries(extra).filter(([k]) => k !== 'container')),
     });
     dlg.destroy();
     ctx.go(`#/text/${encodeURIComponent(row.id)}`);
@@ -102,9 +122,12 @@ export function newTextDialog(ctx) {
 
   const form = h('form', { onsubmit: e => { e.preventDefault(); submit(); } },
     h('h2', 'Add to the queue'),
+    panel,
+    h('p.hint', 'Or type it in directly.'),
     h('div.fields',
       h('div.field.wide', title),
       h('div.field.wide', author),
+      h('div.field', year),
       h('div.field', type)),
     h('div.actions',
       h('button.primary', { type: 'submit' }, 'Add'),

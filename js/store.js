@@ -19,7 +19,8 @@ const DEFAULT_PREFS = {
   w: 0.7,          // spec §4: weight on absolute value
   alpha: 0.7,      // spec §4: small-item correction
   sort: 'smart',
-  group: false,
+  group: true,       // nest chapters under their book by default
+  lookup: true,      // DOI/ISBN/title metadata lookup (Settings can switch it off)
   filters: { q: '', project: '', type: '', familiarity: '', status: 'active' },
 };
 

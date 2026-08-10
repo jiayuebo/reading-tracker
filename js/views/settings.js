@@ -77,7 +77,18 @@ export function renderSettings(root, ctx) {
         ', and your token sits in this browser’s localStorage. Anyone with access to this device or browser profile can read it.'),
       h('p', 'The blast radius is bounded by how the token is scoped: it can read and write one private repo containing a reading list. It cannot touch other repos or your account settings.'),
       h('p', 'That trade holds ', h('strong', 'only while the page loads no third-party script'),
-        '. This build has none — no CDN, no fonts, no analytics — and adding one later would change the calculus silently.'),
+        '. This build loads none — no CDN, no web fonts, no analytics — and adding one later would change the calculus silently.'),
+      h('p', 'Metadata lookup does reach two outside services, ', h('code', 'api.crossref.org'),
+        ' and ', h('code', 'openlibrary.org'), ', but by ', h('em', 'fetching data'),
+        ', not by loading code. A script from another origin could read your token; a JSON reply cannot, and is rendered as text. '
+        + 'What it does cost is that those services see what you look up. No token and no identifying information is sent with the query.'),
+      h('div.actions',
+        h('label.check',
+          h('input', {
+            type: 'checkbox', checked: state.prefs.lookup !== false,
+            onchange: e => { savePrefs({ lookup: e.target.checked }); ctx.rerender(); },
+          }),
+          h('span', 'Allow DOI / ISBN / title lookup'))),
     ),
 
     h('section.card',

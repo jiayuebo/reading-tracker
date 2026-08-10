@@ -7,7 +7,7 @@
 
 import { h, mount } from '../dom.js';
 import { state, mutate } from '../store.js';
-import { childIndex, isContainer, fold, sortKeyTitle, todayISO } from '../model.js';
+import { childIndex, fold, sortKeyTitle, todayISO } from '../model.js';
 
 // Drafts survive the re-render that each resolution triggers.
 const drafts = new Map();
@@ -18,7 +18,7 @@ export function renderTriage(root, ctx) {
   const rows = texts.filter(t => t.status === 'triage');
   const children = childIndex(texts);
   const containers = texts
-    .filter(x => isContainer(x, children) || x.type === 'book' || x.type === 'collection')
+    .filter(x => (children.get(x.id) || []).length > 0 || x.type === 'book')
     .sort((a, b) => sortKeyTitle(a).localeCompare(sortKeyTitle(b)));
 
   mount(root,

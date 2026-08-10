@@ -4,9 +4,11 @@
 import { h, mount } from '../dom.js';
 import { state, mutate } from '../store.js';
 import {
-  TYPES, STATUSES, SOURCES, STATUS_LABEL, childIndex, byIdIndex, isContainer,
+  TYPES, STATUSES, SOURCES, STATUS_LABEL, childIndex, byIdIndex, descendantIds,
   containerName, unreadPrerequisites, quadrant, scores, todayISO, sortKeyTitle,
 } from '../model.js';
+import { lookupPanel, lookupEnabled } from './lookup-ui.js';
+import { applyCandidate, describe } from '../lookup.js';
 
 export function renderDetail(root, ctx, id) {
   const doc = state.doc;
@@ -22,7 +24,6 @@ export function renderDetail(root, ctx, id) {
   const children = childIndex(texts);
   const byId = byIdIndex(texts);
   const kids = children.get(t.id) || [];
-  const container = isContainer(t, children);
   const set = (patch) => { mutate(d => { Object.assign(d.texts.find(x => x.id === t.id), patch); }); ctx.rerender(); };
   const setIn = (block, key, value) => {
     mutate(d => {
@@ -43,17 +44,28 @@ export function renderDetail(root, ctx, id) {
       h('p.counts',
         STATUS_LABEL[t.status] || t.status,
         ' · ', t.source || 'queue',
-        container ? ` · container of ${kids.length} item${kids.length === 1 ? '' : 's'}` : '',
+        kids.length ? ` · contains ${kids.length} row${kids.length === 1 ? '' : 's'}` : '',
       ),
     ),
-
-    container ? h('p.notice.quiet',
-      'This row is a container — a shelf holding other rows. Containers are never scored and never appear in the queue (spec §3).') : null,
 
     blocked.length ? h('p.notice.warn',
       `Prerequisites still unread: ${blocked.map(b => b.title).join('; ')}.`) : null,
 
     actionBar(t, set, ctx),
+
+    lookupEnabled() ? h('section.card',
+      h('h2', 'Look up metadata'),
+      h('p.hint', 'Fills only fields that are still empty, so anything you corrected by hand stays. '
+        + 'Type is the exception: a value of "book" left over from the import is replaced when a real record disagrees.'),
+      lookupPanel((c) => {
+        let changed = [];
+        mutate(d => { changed = applyCandidate(d.texts.find(x => x.id === t.id), c); });
+        ctx.toast(changed.length
+          ? `Filled ${changed.join(', ')} from ${c.source}.`
+          : `${c.source} had nothing this row was missing.`);
+        ctx.rerender();
+      }, { compareTo: t, placeholder: t.title ? `DOI, ISBN, or "${t.title.slice(0, 40)}"` : 'DOI, ISBN, or title...' }),
+    ) : null,
 
     section('Bibliographic', [
       field('Title', h('input', { type: 'text', value: t.title || '', onchange: e => set({ title: e.target.value }) })),
@@ -97,7 +109,7 @@ export function renderDetail(root, ctx, id) {
         'Prior familiarity at the time of adding — a rubric input, not an outcome.'),
     ]),
 
-    container ? null : scoreSection(t, setIn, q),
+    scoreSection(t, setIn, q),
 
     section('Verdict', [
       h('div.field.wide',
@@ -114,6 +126,8 @@ export function renderDetail(root, ctx, id) {
     section('Links', [
       field('Notes link', h('input', { type: 'url', value: t.notes_link || '', placeholder: 'https://…', onchange: e => set({ notes_link: e.target.value.trim() || null }) })),
       field('Zotero key', h('input', { type: 'text', value: t.zotero_key || '', onchange: e => set({ zotero_key: e.target.value.trim() || null }) })),
+      field('DOI', h('input', { type: 'text', value: t.doi || '', placeholder: '10.xxxx/...', onchange: e => set({ doi: e.target.value.trim() || null }) })),
+      field('ISBN', h('input', { type: 'text', value: t.isbn || '', onchange: e => set({ isbn: e.target.value.trim() || null }) })),
     ]),
 
     section('Dates', [
@@ -254,9 +268,17 @@ function selectEl(options, value, onchange) {
     options.map(([v, l]) => h('option', { value: v, selected: String(v) === String(value) }, l)));
 }
 
+/**
+ * Any row may be a parent now that nesting is arbitrary (book -> chapter ->
+ * section). The one thing the picker must refuse is a row's own descendant:
+ * a cycle would hang the queue renderer, so it is prevented at entry rather
+ * than defended against on every read.
+ */
 function parentSelect(t, texts, children, onchange) {
+  const banned = descendantIds(t.id, children);
+  banned.add(t.id);
   const candidates = texts
-    .filter(x => x.id !== t.id && (isContainer(x, children) || x.type === 'book' || x.type === 'collection'))
+    .filter(x => !banned.has(x.id))
     .sort((a, b) => sortKeyTitle(a).localeCompare(sortKeyTitle(b)));
   return selectEl([['', '— none —'], ...candidates.map(c => [c.id, c.title || c.id])], t.parent_id || '', onchange);
 }

@@ -7,7 +7,10 @@
 // first save into a 229-row diff. Read defensively, write full shapes only for
 // rows this app creates.
 
-export const TYPES = ['book', 'chapter', 'article', 'section', 'collection'];
+// `collection` is gone. It only ever held author blocks and seminar blocks —
+// Google Tasks scaffolding that duplicated information the rows already carry.
+// Real containment is now expressed by parent_id, at any depth.
+export const TYPES = ['book', 'chapter', 'article', 'section'];
 export const STATUSES = ['queued', 'reading', 'read', 'abandoned', 'triage'];
 export const SOURCES = ['queue', 'off-list', 'coursework'];
 
@@ -92,23 +95,45 @@ export function byIdIndex(texts) {
   return new Map(texts.map(t => [t.id, t]));
 }
 
-/**
- * A container is a shelf, not a thing to read (spec §3: containers are never
- * scored and never appear in the priority sort).
- *
- * `type` alone cannot decide this. The import defaulted unknown rows to `book`,
- * so 21 queued rows claim to be books when several are plainly articles. What
- * does decide it is whether other rows point at this one. `collection` is
- * always a container even when empty, because that is what the type means.
- */
-export function isContainer(t, children) {
-  return t.type === 'collection' || (children.get(t.id) || []).length > 0;
-}
-
 /** Container display name for a child row, whether linked by id or free text. */
 export function containerName(t, byId) {
   if (t.parent_id && byId.has(t.parent_id)) return byId.get(t.parent_id).title;
   return t.container || null;
+}
+
+/**
+ * Which group a row hangs under, at any depth: a real parent row if one is
+ * linked, otherwise the free-text container it names.
+ *
+ * The fallback matters. Four rows point at books that have no row of their own
+ * ("Critique of Pure Reason", "Lectures on Logic"). Grouping them by the string
+ * keeps the hierarchy visible without inventing rows nobody asked for.
+ */
+export function groupKey(t, byId) {
+  if (t.parent_id && byId.has(t.parent_id)) return `id:${t.parent_id}`;
+  if (t.container) return `text:${fold(t.container)}`;
+  return null;
+}
+
+export const MAX_DEPTH = 8;
+
+/**
+ * Every id at or below `id`. Used to stop a row being made its own ancestor —
+ * arbitrary nesting means a cycle would hang the renderer, so the parent picker
+ * refuses to offer one rather than trusting the data to be acyclic.
+ */
+export function descendantIds(id, children) {
+  const out = new Set();
+  const walk = (cur, depth) => {
+    if (depth > MAX_DEPTH) return;
+    for (const c of children.get(cur) || []) {
+      if (out.has(c.id)) continue;
+      out.add(c.id);
+      walk(c.id, depth + 1);
+    }
+  };
+  walk(id, 0);
+  return out;
 }
 
 export function unreadPrerequisites(t, byId) {
