@@ -2,7 +2,7 @@
 
 import { h, mount } from '../dom.js';
 import { state } from '../store.js';
-import { lookup, describe, classifyQuery, authorsAgree } from '../lookup.js';
+import { lookup, describe, classifyQuery, authorsAgree, rankCandidates } from '../lookup.js';
 
 export function lookupEnabled() {
   return state.prefs.lookup !== false;
@@ -44,7 +44,8 @@ export function lookupPanel(onPick, opts = {}) {
       : `Looking up ${q.kind.toUpperCase()} ${q.value}…`;
     let found;
     try {
-      found = await lookup(raw);
+      found = await lookup(raw, { author: opts.compareTo ? (opts.compareTo.authors || [])[0] : '' });
+      if (opts.compareTo) found = rankCandidates(found, opts.compareTo);
     } catch (err) {
       if (mine !== seq) return;
       status.className = 'hint lookup-status bad';

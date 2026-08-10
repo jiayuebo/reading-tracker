@@ -484,3 +484,33 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
 
 .lookup-hit.mismatch { border-color: color-mix(in srgb, var(--warn) 45%, var(--rule-2)); }
 .lookup-warn { font-size: .74rem; color: var(--warn); }
+
+/* ── backfill ────────────────────────────────────────────────────── */
+
+.backfill-card {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent); border-radius: var(--r);
+  padding: .9rem 1.1rem; margin: 1rem 0;
+}
+.backfill-head { display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap; }
+.backfill-title { font-family: var(--display); font-size: 1.15rem; text-decoration: none; color: inherit; }
+.backfill-title:hover { text-decoration: underline; }
+.backfill-missing { margin: .3rem 0 .8rem; font-size: .82rem; color: var(--warn); }
+
+.backfill-hit {
+  border: 1px solid var(--rule); border-radius: var(--r);
+  padding: .6rem .75rem; margin-top: .5rem; background: var(--surface-2);
+}
+.backfill-hit.mismatch { border-color: color-mix(in srgb, var(--warn) 45%, var(--rule)); }
+.backfill-hit-head { display: flex; gap: .5rem; align-items: baseline; }
+.backfill-hit .actions { margin: .5rem 0 0; }
+
+.diff { list-style: none; margin: .5rem 0 0; padding: 0; font-size: .82rem; }
+.diff li { padding: .1rem 0; }
+.diff-field {
+  display: inline-block; min-width: 5.5rem; color: var(--ink-3);
+  font-family: var(--mono); font-size: .74rem;
+}
+.diff-from { color: var(--ink-3); text-decoration: line-through; }
+.diff-to { color: var(--ok); font-weight: 600; }
+.hint.bad { color: var(--bad); }

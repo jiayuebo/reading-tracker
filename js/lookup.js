@@ -15,6 +15,8 @@
 //
 // Nothing here ever overwrites a field that already has a value.
 
+import { fold } from './model.js';
+
 const CROSSREF = 'https://api.crossref.org/works';
 const OPENLIBRARY = 'https://openlibrary.org/api/books';
 const TIMEOUT_MS = 8000;
@@ -87,6 +89,10 @@ function fromCrossref(w) {
   // a journal article it is the journal, which is not a parent in any sense:
   // nesting an article under "Nous" groups by venue, which is exactly what this
   // tracker does not care about. Route it by type.
+  // Three cases, not two. For a chapter it is the book (a real parent); for an
+  // article it is the journal; for a whole book it is a series or a hosting
+  // platform - Crossref hands back "Oxford Scholarship Online" - which is
+  // neither, and writing that into `journal` would just be noise.
   const isPartOfBook = type === 'chapter' || type === 'section';
   return {
     source: 'Crossref',
@@ -95,7 +101,7 @@ function fromCrossref(w) {
     year: parts && parts[0] ? Number(parts[0]) : null,
     type,
     container: isPartOfBook ? containerTitle : null,
-    journal: isPartOfBook ? null : containerTitle,
+    journal: type === 'article' ? containerTitle : null,
     pages: pageCount(w.page),
     doi: w.DOI || null,
     publisher: w.publisher || null,
@@ -119,8 +125,13 @@ function fromOpenLibrary(rec, isbn) {
 
 // ── the one entry point ─────────────────────────────────────────────
 
-/** @returns {Promise<Array>} candidates, best first. Never throws for "no match". */
-export async function lookup(raw) {
+/**
+ * @param {string} raw a DOI, an ISBN, or free text
+ * @param {{author?: string}} opts an author surname narrows a title search a lot,
+ *   and is the cheapest defence against matching a review instead of the work
+ * @returns {Promise<Array>} candidates, best first. Never throws for "no match".
+ */
+export async function lookup(raw, opts = {}) {
   const q = classifyQuery(raw);
   if (q.kind === 'empty') return [];
 
@@ -137,8 +148,11 @@ export async function lookup(raw) {
     return rec ? [fromOpenLibrary(rec, q.value)] : [];
   }
 
+  const author = (opts.author || '').trim();
   const data = await getJSON(
-    `${CROSSREF}?query.bibliographic=${encodeURIComponent(q.value)}&rows=5&select=title,author,issued,container-title,page,type,DOI,publisher`);
+    `${CROSSREF}?query.bibliographic=${encodeURIComponent(q.value)}`
+    + (author ? `&query.author=${encodeURIComponent(author)}` : '')
+    + '&rows=5&select=title,author,issued,container-title,page,type,DOI,publisher');
   const items = (data && data.message && data.message.items) || [];
   return items.map(fromCrossref).filter(c => c.title);
 }
@@ -204,6 +218,41 @@ export function applyCandidate(row, c, { overwrite = false } = {}) {
     }
   }
   return changed;
+}
+
+/**
+ * Re-rank by how well each candidate's title matches the row's.
+ *
+ * Crossref ranks by its own relevance, which for "Beyond Concepts: Unicepts,
+ * Language, and Natural Information" put four of the book's own chapters above
+ * the book itself. An exact title match is almost always the right answer, so
+ * it should not be fourth in the list.
+ */
+export function rankCandidates(candidates, row) {
+  const want = fold(row && row.title);
+  if (!want) return candidates;
+  const score = (c) => {
+    const got = fold(c.title);
+    if (got === want) return 0;
+    if (want.startsWith(got) || got.startsWith(want)) return 1;
+    if (want.includes(got) || got.includes(want)) return 2;
+    return 3;
+  };
+  return candidates
+    .map((c, i) => ({ c, i, s: score(c) + (authorsAgree(row, c) ? 0 : 0.5) }))
+    .sort((a, b) => a.s - b.s || a.i - b.i)
+    .map(x => x.c);
+}
+
+/** What would applyCandidate actually change? Shown before anything is written. */
+export function previewChanges(row, c) {
+  const clone = JSON.parse(JSON.stringify(row));
+  const fields = applyCandidate(clone, c);
+  return fields.map(f => ({
+    field: f,
+    from: row[f] == null || row[f] === '' ? null : row[f],
+    to: clone[f],
+  }));
 }
 
 export function describe(c) {

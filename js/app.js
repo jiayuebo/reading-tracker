@@ -7,6 +7,7 @@ import {
 } from './store.js';
 import { renderQueue } from './views/queue.js';
 import { renderTriage } from './views/triage.js';
+import { renderBackfill, backfillKeys } from './views/backfill.js';
 import { renderDetail } from './views/detail.js';
 import { renderSettings } from './views/settings.js';
 import { quickLog, newTextDialog, conflictDialog, helpDialog } from './views/dialogs.js';
@@ -56,6 +57,7 @@ function render() {
   } else {
     try {
       if (r.name === 'triage') renderTriage(view, ctx);
+      else if (r.name === 'backfill') renderBackfill(view, ctx);
       else if (r.name === 'text' && r.arg) renderDetail(view, ctx, r.arg);
       else if (r.name === 'settings') renderSettings(view, ctx);
       else renderQueue(view, ctx);
@@ -94,10 +96,15 @@ function restoreFocus(o) {
 // ── chrome ──────────────────────────────────────────────────────────
 
 function renderNav(r) {
-  const triageCount = state.doc ? (state.doc.texts || []).filter(t => t.status === 'triage').length : 0;
+  const texts = state.doc ? (state.doc.texts || []) : [];
+  const triageCount = texts.filter(t => t.status === 'triage').length;
   mount(navEl,
     navLink('#/queue', 'Queue', r.name === 'queue'),
-    navLink('#/triage', triageCount ? `Triage ${triageCount}` : 'Triage', r.name === 'triage'),
+    // Triage empties out and stays empty; keep it out of the way once it has.
+    triageCount || r.name === 'triage'
+      ? navLink('#/triage', triageCount ? `Triage ${triageCount}` : 'Triage', r.name === 'triage')
+      : null,
+    navLink('#/backfill', 'Backfill', r.name === 'backfill'),
     navLink('#/settings', 'Settings', r.name === 'settings'),
   );
 }
@@ -217,10 +224,14 @@ function keys(e) {
 
   if (pendingG) {
     pendingG = false;
-    const map = { q: '#/queue', t: '#/triage', s: '#/settings' };
+    const map = { q: '#/queue', t: '#/triage', s: '#/settings', b: '#/backfill' };
     if (map[e.key]) { e.preventDefault(); location.hash = map[e.key]; }
     return;
   }
+
+  // The active view gets first refusal on a key, so Backfill can bind 1-5/s/u
+  // without those becoming global shortcuts everywhere else.
+  if (route().name === 'backfill' && backfillKeys(e, ctx)) return;
 
   switch (e.key) {
     case 'g': pendingG = true; setTimeout(() => { pendingG = false; }, 900); break;

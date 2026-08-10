@@ -212,9 +212,11 @@ function downloadText(text, filename) {
 /** Keyboard help. */
 export function helpDialog() {
   const keys = [
-    ['g then q', 'Queue'], ['g then t', 'Triage'], ['g then s', 'Settings'],
+    ['g then q', 'Queue'], ['g then t', 'Triage'], ['g then b', 'Backfill'],
+    ['g then s', 'Settings'],
     ['/', 'Focus search'], ['n', 'New text'], ['l', 'Quick-log'],
     ['j / k', 'Move down / up the list'], ['Enter', 'Open the focused row'],
+    ['1 – 5', 'Backfill: accept that match'], ['s / x / u', 'Backfill: skip / nothing to find / undo'],
     ['Cmd/Ctrl S', 'Save now'], ['?', 'This help'], ['Esc', 'Close'],
   ];
   return openDialog(
