@@ -69,6 +69,37 @@ const CROSSREF_TYPE = {
   'reference-book': 'book',
 };
 
+/**
+ * Crossref hands back XML/JATS, not plain text: titles arrive carrying `&amp;`
+ * for an ampersand and markup like `<i>Sophist</i>` for emphasis. Written
+ * straight into a row, those show up verbatim in the interface.
+ *
+ * Parsing as a detached HTML document and taking textContent decodes the
+ * entities and drops the tags in one pass. DOMParser does not run scripts and
+ * the result is never inserted as HTML, so a hostile string stays inert.
+ */
+function cleanText(s) {
+  if (s == null) return '';
+  const str = String(s);
+  if (!/[<&]/.test(str)) return str.replace(/\s+/g, ' ').trim();
+  const doc = new DOMParser().parseFromString(str, 'text/html');
+  return ((doc.body && doc.body.textContent) || str).replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Crossref stores a subtitle in its own field, so reading `title[0]` alone
+ * silently truncates at the colon: "Mind in a Physical World" loses "An Essay
+ * on the Mind-body Problem and Mental Causation".
+ */
+function fullTitle(titleArr, subtitleArr) {
+  const main = cleanText((titleArr || [])[0]);
+  const sub = cleanText((subtitleArr || [])[0]);
+  if (!sub) return main;
+  if (!main) return sub;
+  if (fold(main).includes(fold(sub))) return main;   // some records repeat it
+  return `${main.replace(/[:\s]+$/, '')}: ${sub}`;
+}
+
 function pageCount(page) {
   const m = String(page || '').match(/^(\d+)\s*[-–—]+\s*(\d+)$/);
   if (!m) return null;
@@ -78,11 +109,11 @@ function pageCount(page) {
 
 function fromCrossref(w) {
   const authors = (w.author || [])
-    .map(a => [a.given, a.family].filter(Boolean).join(' ').trim() || a.name)
+    .map(a => cleanText([a.given, a.family].filter(Boolean).join(' ').trim() || a.name))
     .filter(Boolean);
   const parts = w.issued && w.issued['date-parts'] && w.issued['date-parts'][0];
   const type = CROSSREF_TYPE[w.type] || 'article';
-  const containerTitle = (w['container-title'] && w['container-title'][0]) || null;
+  const containerTitle = cleanText((w['container-title'] && w['container-title'][0]) || '') || null;
 
   // Crossref returns one `container-title` for everything, but it means two
   // different things. For a book chapter it is the book — a genuine parent. For
@@ -96,7 +127,7 @@ function fromCrossref(w) {
   const isPartOfBook = type === 'chapter' || type === 'section';
   return {
     source: 'Crossref',
-    title: (w.title && w.title[0]) || '',
+    title: fullTitle(w.title, w.subtitle),
     authors,
     year: parts && parts[0] ? Number(parts[0]) : null,
     type,
@@ -104,22 +135,22 @@ function fromCrossref(w) {
     journal: type === 'article' ? containerTitle : null,
     pages: pageCount(w.page),
     doi: w.DOI || null,
-    publisher: w.publisher || null,
+    publisher: cleanText(w.publisher) || null,
   };
 }
 
 function fromOpenLibrary(rec, isbn) {
   return {
     source: 'OpenLibrary',
-    title: rec.title || '',
-    authors: (rec.authors || []).map(a => a.name).filter(Boolean),
+    title: fullTitle([rec.title], [rec.subtitle]),
+    authors: (rec.authors || []).map(a => cleanText(a.name)).filter(Boolean),
     year: (String(rec.publish_date || '').match(/\d{4}/) || [null])[0] ? Number(String(rec.publish_date).match(/\d{4}/)[0]) : null,
     type: 'book',
     container: null,
     journal: null,
     pages: rec.number_of_pages || null,
     isbn,
-    publisher: (rec.publishers && rec.publishers[0] && rec.publishers[0].name) || null,
+    publisher: cleanText((rec.publishers && rec.publishers[0] && rec.publishers[0].name) || '') || null,
   };
 }
 
@@ -152,7 +183,7 @@ export async function lookup(raw, opts = {}) {
   const data = await getJSON(
     `${CROSSREF}?query.bibliographic=${encodeURIComponent(q.value)}`
     + (author ? `&query.author=${encodeURIComponent(author)}` : '')
-    + '&rows=5&select=title,author,issued,container-title,page,type,DOI,publisher');
+    + '&rows=5&select=title,subtitle,author,issued,container-title,page,type,DOI,publisher');
   const items = (data && data.message && data.message.items) || [];
   return items.map(fromCrossref).filter(c => c.title);
 }
