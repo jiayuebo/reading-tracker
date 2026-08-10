@@ -240,11 +240,41 @@ export function emptyDoc() {
   };
 }
 
-/** Accent- and case-insensitive fold, so "Salmon" finds "Salmón". */
+/**
+ * Normalise a string for matching: case, accents, and punctuation all go.
+ *
+ * Bibliographic titles are full of punctuation that nobody types the same way
+ * twice — colons before subtitles, ampersands between authors, curly versus
+ * straight apostrophes, en dashes in page ranges. Leaving any of it in place
+ * means "Kringelbach Berridge" fails to find "Kringelbach & Berridge" and
+ * "beyond concepts unicepts" fails to find "Beyond Concepts: Unicepts, ...".
+ *
+ * Apostrophes are deleted rather than spaced, so "Tyler's" folds to "tylers"
+ * and both "tylers" and "tyler" still match it. "&" becomes "and" so either
+ * spelling converges. Everything else becomes a space.
+ */
 export function fold(s) {
   return String(s == null ? '' : s)
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[\u2010-\u2015]/g, '-');
+    .replace(/[\u0300-\u036f]/g, '')      // combining marks: Salmón -> salmon
+    .replace(/[\u2018\u2019\u02bc']/g, '') // apostrophes vanish: Tyler's -> tylers
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * Does `hay` match `query`? Every whitespace-separated token in the query must
+ * appear somewhere in the haystack, in any order.
+ *
+ * Substring-matching the whole query is too brittle for this data: it makes
+ * word order significant and breaks on any punctuation sitting between two
+ * words the reader typed adjacently.
+ */
+export function matchesQuery(hay, query) {
+  const tokens = fold(query).split(' ').filter(Boolean);
+  if (!tokens.length) return true;
+  const h = fold(hay);
+  return tokens.every(tok => h.includes(tok));
 }

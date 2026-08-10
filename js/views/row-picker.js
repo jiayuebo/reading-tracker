@@ -6,7 +6,7 @@
 // be reachable here too, not only by dragging.
 
 import { h, mount } from '../dom.js';
-import { fold, sortKeyTitle, authorLine, STATUS_LABEL } from '../model.js';
+import { matchesQuery, sortKeyTitle, authorLine, STATUS_LABEL } from '../model.js';
 
 const MAX_SHOWN = 8;
 
@@ -77,9 +77,9 @@ export function rowPicker({ texts, value, banned, onChange, placeholder }) {
   };
 
   const search = () => {
-    const q = fold(input.value);
+    const q = input.value.trim();
     matches = (q
-      ? candidates.filter(x => fold(`${x.title} ${(x.authors || []).join(' ')}`).includes(q))
+      ? candidates.filter(x => matchesQuery(`${x.title} ${(x.authors || []).join(' ')}`, q))
       : candidates
     ).slice(0, MAX_SHOWN);
     active = matches.length ? 0 : -1;

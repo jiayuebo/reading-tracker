@@ -18,7 +18,7 @@ import { h, mount } from '../dom.js';
 import { state, savePrefs, mutate } from '../store.js';
 import {
   childIndex, byIdIndex, containerName, unreadPrerequisites, groupKey, MAX_DEPTH, descendantIds,
-  authorLine, priority, isScored, scores, sortKeyTitle, fold,
+  authorLine, priority, isScored, scores, sortKeyTitle, fold, matchesQuery,
 } from '../model.js';
 
 const SCOPES = {
@@ -100,18 +100,18 @@ function matches(t, f, byId) {
   if (f.project && !(t.project_ids || []).includes(f.project)) return false;
   if (f.familiarity !== '' && f.familiarity != null && String(t.familiarity ?? '') !== String(f.familiarity)) return false;
   if (f.q) {
-    const q = fold(f.q);
-    const hay = fold([
+    const hay = [
       t.title,
       (t.authors || []).join(' '),
       t.container,
       containerName(t, byId),
+      t.journal,
       (t.shelves || []).join(' '),
       (t.import || {}).raw_title,
       (t.import || {}).also_known_as,
       t.year,
-    ].filter(Boolean).join('  '));
-    if (!hay.includes(q)) return false;
+    ].filter(Boolean).join(' ');
+    if (!matchesQuery(hay, f.q)) return false;
   }
   return true;
 }
@@ -139,8 +139,11 @@ function sortRows(rows, prefs) {
       case 'added-asc': return dateCmp(a, b, 'asc') || titleCmp(a, b);
       case 'title': return titleCmp(a, b);
       case 'author': {
-        const aa = fold(authorLine(a) || '\uffff'), bb = fold(authorLine(b) || '\uffff');
-        return aa.localeCompare(bb) || titleCmp(a, b);
+        const aa = authorLine(a), bb = authorLine(b);
+        if (!aa && !bb) return titleCmp(a, b);
+        if (!aa) return 1;                       // rows with no author sort last
+        if (!bb) return -1;
+        return fold(aa).localeCompare(fold(bb)) || titleCmp(a, b);
       }
       case 'smart':
       default: {
