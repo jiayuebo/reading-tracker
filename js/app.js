@@ -8,6 +8,7 @@ import {
 import { renderQueue } from './views/queue.js';
 import { renderTriage } from './views/triage.js';
 import { renderBackfill, backfillKeys } from './views/backfill.js';
+import { renderPool } from './views/pool.js';
 import { renderDetail } from './views/detail.js';
 import { renderSettings } from './views/settings.js';
 import { quickLog, newTextDialog, conflictDialog, helpDialog } from './views/dialogs.js';
@@ -58,6 +59,7 @@ function render() {
     try {
       if (r.name === 'triage') renderTriage(view, ctx);
       else if (r.name === 'backfill') renderBackfill(view, ctx);
+      else if (r.name === 'pool') renderPool(view, ctx);
       else if (r.name === 'text' && r.arg) renderDetail(view, ctx, r.arg);
       else if (r.name === 'settings') renderSettings(view, ctx);
       else renderQueue(view, ctx);
@@ -105,6 +107,7 @@ function renderNav(r) {
       ? navLink('#/triage', triageCount ? `Triage ${triageCount}` : 'Triage', r.name === 'triage')
       : null,
     navLink('#/backfill', 'Backfill', r.name === 'backfill'),
+    navLink('#/pool', 'Pool', r.name === 'pool'),
     navLink('#/settings', 'Settings', r.name === 'settings'),
   );
 }
@@ -224,7 +227,7 @@ function keys(e) {
 
   if (pendingG) {
     pendingG = false;
-    const map = { q: '#/queue', t: '#/triage', s: '#/settings', b: '#/backfill' };
+    const map = { q: '#/queue', t: '#/triage', s: '#/settings', b: '#/backfill', p: '#/pool' };
     if (map[e.key]) { e.preventDefault(); location.hash = map[e.key]; }
     return;
   }

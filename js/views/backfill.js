@@ -15,11 +15,15 @@
 
 import { h, mount } from '../dom.js';
 import { state, mutate } from '../store.js';
-import { childIndex, authorLine, todayISO, STATUS_LABEL } from '../model.js';
+import { childIndex, authorLine, todayISO, STATUS_LABEL, inPool } from '../model.js';
 import { lookup, applyCandidate, previewChanges, authorsAgree, describe, rankCandidates } from '../lookup.js';
 
 const SCOPES = {
   queue: { label: 'Queue first', test: t => t.status === 'queued' || t.status === 'reading' },
+  // The rubric trains on the read corpus and predicts on the queue, so features
+  // are needed on both. The pool is the part of the read corpus that will
+  // actually be compared, which makes it the shortest path to phase 2.
+  pool: { label: 'Comparison pool', test: t => inPool(t) },
   read: { label: 'Read corpus', test: t => t.status === 'read' },
   all: { label: 'Everything', test: t => t.status !== 'triage' },
 };

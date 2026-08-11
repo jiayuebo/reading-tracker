@@ -5,7 +5,7 @@ import { h, mount } from '../dom.js';
 import { state, mutate } from '../store.js';
 import {
   TYPES, STATUSES, SOURCES, STATUS_LABEL, childIndex, byIdIndex, descendantIds,
-  containerName, unreadPrerequisites, quadrant, scores, todayISO, sortKeyTitle,
+  containerName, unreadPrerequisites, quadrant, scores, todayISO, sortKeyTitle, poolEligible,
 } from '../model.js';
 import { lookupPanel, lookupEnabled } from './lookup-ui.js';
 import { applyCandidate, describe } from '../lookup.js';
@@ -112,6 +112,7 @@ export function renderDetail(root, ctx, id) {
         ['notes_written', 'Notes written'],
         ['carded', 'Carded'],
         ['reread_wanted', 'Reread wanted'],
+        ...(poolEligible(t) ? [['in_pool', 'In the comparison pool']] : []),
       ], t, set),
     ]),
 

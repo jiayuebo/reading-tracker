@@ -161,6 +161,48 @@ export function sortKeyTitle(t) {
   return String(t.title || '').toLowerCase().replace(/^(the|a|an)\s+/, '');
 }
 
+// ── comparison pool (spec §4) ───────────────────────────────────────
+
+/**
+ * Can this text be compared at all?
+ *
+ * §4: comparisons are drawn only from completed reading — the whole constraint
+ * is that unread texts cannot be judged against each other.
+ *
+ * §10: a row imported from a syllabus but never confirmed as actually read is
+ * excluded. A wrong row there does not merely mislabel itself; it enters the
+ * Bradley-Terry training set and teaches the rubric something false, which then
+ * propagates to every prediction in the queue.
+ *
+ * `abandoned` is deliberately out. It is a first-class outcome worth keeping,
+ * but "which would I more regret never having read" is not answerable about a
+ * text that was put down partway.
+ */
+export function poolEligible(t) {
+  if (t.status !== 'read') return false;
+  if ((t.import || {}).confidence === 'syllabus') return false;
+  return true;
+}
+
+export function inPool(t) { return t.in_pool === true; }
+
+/**
+ * What a pool of this size costs, at §4's 4-6 comparisons per item per
+ * dimension. Each comparison covers two items, so ~2.5N per dimension.
+ * Surfaced live while choosing, because the number is the whole argument for
+ * sampling rather than comparing the entire read corpus.
+ */
+export function poolCost(n) {
+  const perDimension = Math.ceil(n * 2.5);
+  const total = perDimension * 3;
+  return {
+    perDimension,
+    total,
+    batches: Math.ceil(total / 20),
+    minutes: Math.round(total * 3 / 60),
+  };
+}
+
 // ── scores (all null until phase 2; hand-entry allowed in phase 1) ───
 
 /** Which block a score comes from: realized beats predicted for read texts. */

@@ -514,3 +514,31 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
 .diff-from { color: var(--ink-3); text-decoration: line-through; }
 .diff-to { color: var(--ok); font-weight: 600; }
 .hint.bad { color: var(--bad); }
+
+/* ── comparison pool ─────────────────────────────────────────────── */
+
+.cost-panel {
+  border: 1px solid var(--rule); border-left: 3px solid var(--accent);
+  border-radius: var(--r); padding: .6rem .85rem; margin: .9rem 0;
+  background: var(--surface); font-size: .88rem;
+}
+.cost-panel.warn { border-left-color: var(--warn); }
+.cost-panel p { margin: 0; }
+.cost-panel .hint { margin-top: .35rem; }
+
+.pool-list { list-style: none; margin: 0; padding: 0; }
+.pool-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem 1rem;
+  align-items: center; border-bottom: 1px solid var(--rule);
+}
+.pool-label {
+  display: flex; gap: .6rem; align-items: baseline; padding: .45rem 0;
+  cursor: pointer; min-width: 0;
+}
+.pool-label input { margin-top: .3rem; flex: none; }
+.pool-main { min-width: 0; }
+.pool-row:hover { background: color-mix(in srgb, var(--surface) 60%, transparent); }
+@media (max-width: 720px) {
+  .pool-row { grid-template-columns: 1fr; }
+  .pool-row .row-tags { justify-content: flex-start; padding-bottom: .4rem; }
+}
