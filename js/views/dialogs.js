@@ -102,6 +102,10 @@ export function newTextDialog(ctx) {
     if (c.doi) extra.doi = c.doi;
     if (c.isbn) extra.isbn = c.isbn;
     title.focus();
+  }, {
+    // Whatever is already typed into the author box narrows the search, which is
+    // what lets a book's Crossref record and its OpenLibrary page count merge.
+    authorHint: () => (author.value.split(',')[0] || '').trim(),
   });
 
   const submit = () => {

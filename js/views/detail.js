@@ -65,7 +65,7 @@ export function renderDetail(root, ctx, id) {
           ? `Filled ${changed.join(', ')} from ${c.source}.`
           : `${c.source} had nothing this row was missing.`);
         ctx.rerender();
-      }, { compareTo: t, placeholder: t.title ? `DOI, ISBN, or "${t.title.slice(0, 40)}"` : 'DOI, ISBN, or title...' }),
+      }, { compareTo: t, placeholder: t.title ? `DOI, ISBN, JSTOR link, or "${t.title.slice(0, 30)}"` : 'DOI, ISBN, JSTOR link, or title...' }),
     ) : null,
 
     section('Bibliographic', [

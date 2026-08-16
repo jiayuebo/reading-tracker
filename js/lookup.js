@@ -1,4 +1,5 @@
-// Bibliographic lookup: Crossref for DOIs and title search, OpenLibrary for ISBNs.
+// Bibliographic lookup: Crossref for DOIs, OpenLibrary for ISBNs, both for a
+// title search. JSTOR links resolve through their 10.2307 DOI.
 //
 // ON THE SECURITY CONSTRAINT (spec §2, §9). The rule that matters is "no
 // third-party SCRIPT". A <script src> from another origin executes with full
@@ -19,6 +20,7 @@ import { fold } from './model.js';
 
 const CROSSREF = 'https://api.crossref.org/works';
 const OPENLIBRARY = 'https://openlibrary.org/api/books';
+const OPENLIBRARY_SEARCH = 'https://openlibrary.org/search.json';
 const TIMEOUT_MS = 8000;
 
 export const LOOKUP_ORIGINS = ['api.crossref.org', 'openlibrary.org'];
@@ -30,6 +32,18 @@ export function classifyQuery(raw) {
 
   const doi = s.match(/\b(10\.\d{4,9}\/[^\s"'<>]+)/i);
   if (doi) return { kind: 'doi', value: doi[1].replace(/[.,;)]+$/, '') };
+
+  // JSTOR. There is no metadata API to call: jstor.org sends no CORS header, so
+  // a browser cannot read it, and JSTOR's real APIs need an institutional
+  // agreement. What does work is that most JSTOR items carry a DOI under the
+  // 10.2307 prefix built from the stable id, and Crossref will resolve that.
+  // So a pasted JSTOR link becomes a DOI lookup.
+  const jstor = s.match(/jstor\.org\/stable\/(?:pdf\/)?([^\s?#/]+)/i)
+    || s.match(/^stable\/([^\s?#/]+)$/i);
+  if (jstor) {
+    const id = jstor[1].replace(/\.pdf$/i, '');
+    return { kind: 'doi', value: `10.2307/${id}`, via: 'JSTOR' };
+  }
 
   const digits = s.replace(/[\s-]/g, '');
   if (/^\d{9}[\dXx]$/.test(digits) || /^\d{13}$/.test(digits)) {
@@ -115,11 +129,6 @@ function fromCrossref(w) {
   const type = CROSSREF_TYPE[w.type] || 'article';
   const containerTitle = cleanText((w['container-title'] && w['container-title'][0]) || '') || null;
 
-  // Crossref returns one `container-title` for everything, but it means two
-  // different things. For a book chapter it is the book — a genuine parent. For
-  // a journal article it is the journal, which is not a parent in any sense:
-  // nesting an article under "Nous" groups by venue, which is exactly what this
-  // tracker does not care about. Route it by type.
   // Three cases, not two. For a chapter it is the book (a real parent); for an
   // article it is the journal; for a whole book it is a series or a hosting
   // platform - Crossref hands back "Oxford Scholarship Online" - which is
@@ -135,6 +144,7 @@ function fromCrossref(w) {
     journal: type === 'article' ? containerTitle : null,
     pages: pageCount(w.page),
     doi: w.DOI || null,
+    isbn: (w.ISBN && w.ISBN[0]) || null,
     publisher: cleanText(w.publisher) || null,
   };
 }
@@ -152,6 +162,78 @@ function fromOpenLibrary(rec, isbn) {
     isbn,
     publisher: cleanText((rec.publishers && rec.publishers[0] && rec.publishers[0].name) || '') || null,
   };
+}
+
+/**
+ * OpenLibrary's search endpoint, as opposed to its ISBN endpoint.
+ *
+ * This exists because Crossref is a DOI registry: everything in it has a DOI,
+ * and its record for a whole book is the publisher's electronic edition, which
+ * carries no page count. Ask Crossref for "Mind in a Physical World" and the
+ * monograph comes back with `page: null`. OpenLibrary has 156 pages for the
+ * same book. Neither source alone answers a book title search well.
+ */
+function fromOpenLibrarySearch(doc) {
+  return {
+    source: 'OpenLibrary',
+    title: fullTitle([doc.title], [doc.subtitle]),
+    authors: (doc.author_name || []).map(cleanText).filter(Boolean),
+    year: doc.first_publish_year || null,
+    type: 'book',
+    container: null,
+    journal: null,
+    pages: doc.number_of_pages_median || null,
+    doi: null,
+    isbn: (doc.isbn && doc.isbn[0]) || null,
+    publisher: cleanText((doc.publisher || [])[0]) || null,
+  };
+}
+
+function surnameOfFirst(c) {
+  const a = (c.authors || [])[0] || '';
+  return fold(String(a).trim().split(/\s+/).pop());
+}
+
+/**
+ * Are these two records the same work?
+ *
+ * Same first-author surname is the hard requirement — it is what keeps a review
+ * of a book from merging into the book. Beyond that, the two catalogues rarely
+ * agree on the title: Crossref carries "Mind in a Physical World: An Essay on
+ * the Mind-Body Problem and Mental Causation" and OpenLibrary just "Mind in a
+ * Physical World". Matching only on equality leaves the DOI and the page count
+ * on separate candidates, which is the thing worth fixing.
+ *
+ * So a subtitle may be present on one side and absent on the other — but only
+ * a real subtitle. The extra text has to sit after a colon or dash, or
+ * "Causation" would swallow "Causation and Counterfactuals".
+ */
+function sameWork(a, b) {
+  if (surnameOfFirst(a) !== surnameOfFirst(b)) return false;
+  const ta = fold(a.title), tb = fold(b.title);
+  if (!ta || !tb) return false;
+  if (ta === tb) return true;
+  const [shorter, longer] = ta.length <= tb.length ? [a, b] : [b, a];
+  const mainOfLonger = fold(String(longer.title).split(/[:—–]/)[0]);
+  return mainOfLonger === fold(shorter.title);
+}
+
+/** Fold the two sources' views of one work into a single candidate. */
+function mergeCandidates(list) {
+  const out = [];
+  for (const c of list) {
+    const m = out.find(x => sameWork(x, c));
+    if (!m) { out.push({ ...c }); continue; }
+    for (const f of ['year', 'pages', 'doi', 'isbn', 'container', 'journal', 'publisher']) {
+      if (m[f] == null && c[f] != null) m[f] = c[f];
+    }
+    if (!(m.authors || []).length && (c.authors || []).length) m.authors = c.authors;
+    if ((c.title || '').length > (m.title || '').length) m.title = c.title;
+    // Crossref distinguishes chapter from book; OpenLibrary calls everything a book.
+    if (c.source === 'Crossref') m.type = c.type;
+    if (!String(m.source).includes(c.source)) m.source = `${m.source} + ${c.source}`;
+  }
+  return out;
 }
 
 // ── the one entry point ─────────────────────────────────────────────
@@ -179,13 +261,28 @@ export async function lookup(raw, opts = {}) {
     return rec ? [fromOpenLibrary(rec, q.value)] : [];
   }
 
+  // A title search asks both. Crossref alone systematically fails on books:
+  // it is a DOI registry, so its book records are electronic editions with no
+  // page count, while OpenLibrary is a book catalogue and has one.
   const author = (opts.author || '').trim();
-  const data = await getJSON(
-    `${CROSSREF}?query.bibliographic=${encodeURIComponent(q.value)}`
-    + (author ? `&query.author=${encodeURIComponent(author)}` : '')
-    + '&rows=5&select=title,subtitle,author,issued,container-title,page,type,DOI,publisher');
-  const items = (data && data.message && data.message.items) || [];
-  return items.map(fromCrossref).filter(c => c.title);
+  const [cr, ol] = await Promise.allSettled([
+    getJSON(`${CROSSREF}?query.bibliographic=${encodeURIComponent(q.value)}`
+      + (author ? `&query.author=${encodeURIComponent(author)}` : '')
+      + '&rows=5&select=title,subtitle,author,issued,container-title,page,type,DOI,ISBN,publisher'),
+    // OpenLibrary indexes the title proper, so searching it with a subtitle
+    // attached finds nothing: "Beyond Concepts: Unicepts, Language, and Natural
+    // Information" misses a catalogue entry filed as "Beyond Concepts".
+    getJSON(`${OPENLIBRARY_SEARCH}?title=${encodeURIComponent(q.value.split(/[:—–]/)[0].trim() || q.value)}`
+      + (author ? `&author=${encodeURIComponent(author)}` : '')
+      + '&limit=5&fields=title,subtitle,author_name,first_publish_year,number_of_pages_median,isbn,publisher'),
+  ]);
+  // One source failing is survivable; both failing is the error.
+  if (cr.status === 'rejected' && ol.status === 'rejected') throw cr.reason;
+  const items = [
+    ...(cr.status === 'fulfilled' ? ((cr.value.message && cr.value.message.items) || []).map(fromCrossref) : []),
+    ...(ol.status === 'fulfilled' ? (ol.value.docs || []).map(fromOpenLibrarySearch) : []),
+  ];
+  return mergeCandidates(items).filter(c => c.title).slice(0, 6);
 }
 
 function surnames(list) {
@@ -294,5 +391,10 @@ export function describe(c) {
   if (c.year) bits.push(String(c.year));
   if (c.journal || c.container) bits.push(c.journal || c.container);
   if (c.type) bits.push(c.type);
+  if (c.pages) bits.push(`${c.pages} pp`);
+  // Which source a candidate came from matters now that a title search asks two
+  // and merges them: "Crossref + OpenLibrary" means the DOI and the page count
+  // are from different catalogues.
+  if (c.source) bits.push(c.source);
   return bits.join(' · ');
 }

@@ -78,8 +78,11 @@ export function renderSettings(root, ctx) {
       h('p', 'The blast radius is bounded by how the token is scoped: it can read and write one private repo containing a reading list. It cannot touch other repos or your account settings.'),
       h('p', 'That trade holds ', h('strong', 'only while the page loads no third-party script'),
         '. This build loads none — no CDN, no web fonts, no analytics — and adding one later would change the calculus silently.'),
-      h('p', 'Metadata lookup does reach two outside services, ', h('code', 'api.crossref.org'),
-        ' and ', h('code', 'openlibrary.org'), ', but by ', h('em', 'fetching data'),
+      h('p', 'Metadata lookup reaches two outside services — ', h('code', 'api.crossref.org'),
+        ' for DOIs and article search, ', h('code', 'openlibrary.org'),
+        ' for ISBNs and book page counts. A JSTOR link is resolved through its DOI at Crossref; '
+        + 'jstor.org itself is never contacted, because it sends no CORS header and its own APIs '
+        + 'need an institutional agreement. Both services are reached by ', h('em', 'fetching data'),
         ', not by loading code. A script from another origin could read your token; a JSON reply cannot, and is rendered as text. '
         + 'What it does cost is that those services see what you look up. No token and no identifying information is sent with the query.'),
       h('div.actions',

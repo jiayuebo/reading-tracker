@@ -10,7 +10,7 @@ export function lookupEnabled() {
 
 /**
  * @param {(candidate: object) => void} onPick
- * @param {{placeholder?: string, compareTo?: object}} opts
+ * @param {{placeholder?: string, compareTo?: object, authorHint?: () => string}} opts
  *
  * `compareTo` is the row being enriched. When it has authors and a candidate
  * does not share one, the candidate is marked: a review, reply or symposium
@@ -26,7 +26,7 @@ export function lookupPanel(onPick, opts = {}) {
   const results = h('div.lookup-results');
   const input = h('input.lookup-input', {
     type: 'text',
-    placeholder: opts.placeholder || 'DOI, ISBN, or title…',
+    placeholder: opts.placeholder || 'DOI, ISBN, JSTOR link, or title…',
     'aria-label': 'DOI, ISBN, or title to look up',
     onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); go(); } },
   });
@@ -40,12 +40,21 @@ export function lookupPanel(onPick, opts = {}) {
     mount(results);
     status.className = 'hint lookup-status';
     status.textContent = q.kind === 'title'
-      ? 'Searching Crossref by title…'
-      : `Looking up ${q.kind.toUpperCase()} ${q.value}…`;
+      ? 'Searching Crossref and OpenLibrary…'
+      : q.via
+        ? `${q.via} link → DOI ${q.value}…`
+        : `Looking up ${q.kind.toUpperCase()} ${q.value}…`;
     let found;
     try {
-      found = await lookup(raw, { author: opts.compareTo ? (opts.compareTo.authors || [])[0] : '' });
-      if (opts.compareTo) found = rankCandidates(found, opts.compareTo);
+      const author = opts.compareTo
+        ? (opts.compareTo.authors || [])[0]
+        : (opts.authorHint ? opts.authorHint() : '');
+      found = await lookup(raw, { author });
+      // Rank against the row being enriched when there is one, and against what
+      // was typed when there is not — adding a new text has no existing row to
+      // compare with, but the title just entered is a perfectly good hint, and
+      // without it Crossref's own relevance order buries the obvious match.
+      found = rankCandidates(found, opts.compareTo || { title: q.value, authors: author ? [author] : [] });
     } catch (err) {
       if (mine !== seq) return;
       status.className = 'hint lookup-status bad';
@@ -56,13 +65,16 @@ export function lookupPanel(onPick, opts = {}) {
     if (!found.length) {
       status.className = 'hint lookup-status';
       status.textContent = q.kind === 'title'
-        ? 'No match. Try the DOI, or just type the details in.'
-        : 'No record found for that identifier.';
+        ? 'No match. Try the DOI or ISBN, or just type the details in.'
+        : q.via === 'JSTOR'
+          ? `No Crossref record for ${q.value}. Not every JSTOR item has a 10.2307 DOI — try the DOI printed on the article's JSTOR page.`
+          : 'No record found for that identifier.';
       return;
     }
+    const sources = [...new Set(found.flatMap(c => String(c.source).split(' + ')))].join(' and ');
     status.textContent = found.length === 1
-      ? `One match from ${found[0].source}.`
-      : `${found.length} matches from ${found[0].source} — pick the right one.`;
+      ? `One match from ${sources}.`
+      : `${found.length} matches from ${sources} — pick the right one.`;
     mount(results, found.map(c => {
       const mismatch = opts.compareTo && !authorsAgree(opts.compareTo, c);
       return h(`button.lookup-hit${mismatch ? '.mismatch' : ''}`, {
