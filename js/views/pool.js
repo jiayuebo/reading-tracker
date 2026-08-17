@@ -1,21 +1,20 @@
-// Comparison pool (spec §4, phase 1.5).
+// Comparison pool (spec §4).
 //
-// §4 says to sample pairs adaptively but never says which texts are in the pool
-// to begin with, and the arithmetic makes that the load-bearing decision. At
-// 4-6 comparisons per item per dimension, the 149-text read corpus is roughly
-// 1,100 comparisons across the three dimensions — an hour of clicking, and
-// exactly the "scoring becomes a procrastination object" risk §9 names.
+// Built to bound a fitting budget, and RESIZED by the 2026-08-11 revision. There
+// is no Bradley-Terry fit any more: comparisons are an audit of scores that an
+// outside evaluation produced, and auditing needs a fraction of what fitting did
+// — a few dozen pairs drawn from wherever the standing scores sit closest, not
+// hundreds. So a pool of forty is generous rather than minimal.
 //
-// The comparisons exist to train the rubric, not to rank the shelf. Forty to
-// sixty well-chosen texts carry nearly the same signal, and the rubric
-// extrapolates to everything else — which is the whole point of extrapolating.
-// So: choose the pool deliberately, see what it costs while choosing, and let
-// Backfill work on that subset instead of the whole corpus.
+// It keeps a second use that survives the revision, and may be the better one:
+// it is a standing statement of which read texts actually matter, which makes it
+// the right subset to hand an evaluator as corpus context when the whole read
+// corpus would be noise.
 
 import { h, mount } from '../dom.js';
 import { state, mutate } from '../store.js';
 import {
-  poolEligible, inPool, poolCost, authorLine, sortKeyTitle, matchesQuery, STATUS_LABEL,
+  poolEligible, inPool, authorLine, sortKeyTitle, matchesQuery,
 } from '../model.js';
 
 const FILTERS = {
@@ -42,7 +41,6 @@ export function renderPool(root, ctx) {
   const texts = (state.doc && state.doc.texts) || [];
   const eligible = texts.filter(poolEligible);
   const chosen = eligible.filter(inPool);
-  const cost = poolCost(chosen.length);
 
   const shown = eligible
     .filter(FILTERS[filter].test)
@@ -66,12 +64,13 @@ export function renderPool(root, ctx) {
     ),
 
     h('p.notice.quiet',
-      'Comparisons train the rubric; they do not rank the shelf directly. A sampled 40–60 '
-      + 'carries nearly the signal of the whole corpus, and the rubric extrapolates to the rest. '
-      + 'Texts read but never confirmed from a syllabus are excluded automatically (spec §10).'),
+      'Two uses. These are the read texts handed to an evaluation as corpus context, and the '
+      + 'pool that audit comparisons are drawn from. Auditing needs only a few dozen pairs, so '
+      + 'forty is already generous. Texts read but never confirmed from a syllabus are excluded '
+      + 'automatically (spec §10).'),
 
-    chosen.length ? costPanel(chosen.length, cost) : null,
-    chosen.length ? readiness(chosen, missingYear, ctx) : null,
+    chosen.length ? costPanel(chosen.length) : null,
+    chosen.length ? readiness(chosen, missingYear) : null,
 
     h('div.controls',
       h('input.search', {
@@ -108,30 +107,28 @@ export function renderPool(root, ctx) {
   );
 }
 
-function costPanel(n, c) {
-  const heavy = n > 70;
-  return h(`div.cost-panel${heavy ? '.warn' : ''}`,
+function costPanel(n) {
+  return h('div.cost-panel',
     h('p',
-      h('strong', `${n} texts`), ' → about ',
-      h('strong.tabular', String(c.perDimension)), ' comparisons per dimension, ',
-      h('strong.tabular', String(c.total)), ' in all — ',
-      `${c.batches} batches of 20, roughly ${c.minutes} minutes of clicking.`),
-    heavy
-      ? h('p.hint', 'That is a lot to sit through in one stretch, and an unfinished pass is worth '
-        + 'less than a smaller finished one. Consider trimming toward 60.')
-      : null);
+      h('strong', `${n} texts`),
+      ' of corpus context, and the pool an audit draws its pairs from.'),
+    h('p.hint', 'Auditing a ranking takes far fewer comparisons than fitting one did: twenty or '
+      + 'thirty pairs will expose a systematic lean. There is no reason to grow this much beyond '
+      + 'sixty.'));
 }
 
-function readiness(chosen, missingYear, ctx) {
-  if (!missingYear.length) {
-    return h('p.notice.quiet',
-      `All ${chosen.length} have a year. The rubric has features to regress on for every text in the pool.`);
-  }
-  return h('p.notice.warn',
-    `${missingYear.length} of ${chosen.length} still have no year, so the rubric would have `
-    + 'nothing but the author to learn from for those. ',
-    h('a', { href: '#/backfill' }, 'Backfill them'),
-    ' — the Backfill scope selector has a "Comparison pool" option.');
+function readiness(chosen, missingYear) {
+  const marked = chosen.filter(t => t.assessment).length;
+  return h('p.notice.quiet',
+    `${marked} of ${chosen.length} carry a good/bad mark. `,
+    marked
+      ? 'Those anchor what the top and bottom of the scale mean to you.'
+      : 'Without any, an evaluation has nothing tying its scale to your judgment — a handful at '
+        + 'each end is worth more than a hundred in the middle.',
+    missingYear.length
+      ? [' ', `${missingYear.length} have no year; `, h('a', { href: '#/backfill' }, 'Backfill'),
+        ' can fill those, though year is no longer load-bearing.']
+      : null);
 }
 
 function poolRow(t) {

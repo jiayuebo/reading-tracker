@@ -34,6 +34,18 @@ export function renderDetail(root, ctx, id) {
     ctx.rerender();
   };
 
+  // `assessment` is sparse: cleared means the key goes away, not that it becomes
+  // false or undefined. Absence is a meaningful third state (§4) and has to look
+  // like absence in the file.
+  const setAssessment = (value) => {
+    mutate(d => {
+      const row = d.texts.find(x => x.id === t.id);
+      if (value) row.assessment = value;
+      else delete row.assessment;
+    });
+    ctx.rerender();
+  };
+
   const q = quadrant(t);
   const blocked = unreadPrerequisites(t, byId);
 
@@ -103,6 +115,8 @@ export function renderDetail(root, ctx, id) {
         h('p.hint', 'Only for a parent that has no record of its own. The queue groups by this '
           + 'string until you link a real row above, which takes precedence.')),
     ),
+
+    t.status === 'read' || t.status === 'abandoned' ? assessmentCard(t, setAssessment) : null,
 
     section('State', [
       field('Status', selectEl(STATUSES.map(x => [x, STATUS_LABEL[x]]), t.status, v => set({ status: v }))),
@@ -202,6 +216,28 @@ function actionBar(t, set, ctx) {
   return h('div.actions', btns);
 }
 
+/**
+ * The two-sided anchor (spec §4). One click, and the wording matters: this asks
+ * whether the hours paid, not whether the text was enjoyed. Absence is a third
+ * state and means "not evaluated" — never "average".
+ */
+function assessmentCard(t, setAssessment) {
+  const btn = (value, label) => h(`button${t.assessment === value ? '.primary' : ''}`, {
+    onclick: () => setAssessment(t.assessment === value ? null : value),
+  }, label);
+  return h('section.card',
+    h('h2', 'Was it worth the hours?'),
+    h('div.actions',
+      btn('good', 'Good'),
+      btn('bad', 'Bad'),
+      h('span.spacer'),
+      h('span.hint.dim', t.assessment ? 'Click again to clear.' : 'Unmarked — not evaluated.')),
+    h('p.hint', 'Good means you would have regretted missing it; bad means the hours did not pay. '
+      + 'Not whether you enjoyed it — Begriffsschrift is a grind and belongs in good. '
+      + 'Leaving it unmarked is fine and is not read as a middling score.'),
+  );
+}
+
 function scoreSection(t, setIn, q) {
   const p = t.predicted || {};
   const r = t.realized || {};
@@ -216,6 +252,12 @@ function scoreSection(t, setIn, q) {
         scored ? null : 'Realized scores are for finished texts.'),
       scoreRow('Latent (fitted)', l, null, false, 'Written by the Bradley-Terry fit in phase 2.'),
     ),
+    (t.predicted || {}).reason
+      ? h('p.eval-reason', h('span.dim', 'why: '), t.predicted.reason)
+      : null,
+    (t.predicted || {}).rubric_version
+      ? h('p.hint.dim', `Scored ${t.predicted.date || ''} under prompt version ${t.predicted.rubric_version}.`)
+      : null,
     q ? h('div.quadrant', { dataset: { q: q.key } },
       h('strong', q.label), ' — ', q.note,
     ) : h('p.hint.dim', 'The read/card quadrant appears once both value axes have numbers.'),

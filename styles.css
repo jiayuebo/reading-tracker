@@ -542,3 +542,19 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
   .pool-row { grid-template-columns: 1fr; }
   .pool-row .row-tags { justify-content: flex-start; padding-bottom: .4rem; }
 }
+
+/* ── evaluate ────────────────────────────────────────────────────── */
+
+.eval-rows { list-style: none; margin: .8rem 0 0; padding: 0; }
+.eval-row {
+  border-top: 1px solid var(--rule); padding: .55rem 0;
+}
+.eval-head { display: flex; gap: .5rem; align-items: baseline; }
+.eval-head a { font-family: var(--display); font-size: .98rem; text-decoration: none; color: inherit; }
+.eval-head a:hover { text-decoration: underline; }
+.eval-reason {
+  margin: .2rem 0 0; font-size: .84rem; color: var(--ink-2);
+  border-left: 2px solid var(--rule-2); padding-left: .55rem;
+}
+.review { margin-top: .8rem; }
+.review .diff { margin-top: .3rem; }

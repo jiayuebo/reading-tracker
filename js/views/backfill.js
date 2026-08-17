@@ -1,15 +1,16 @@
 // Backfill (spec §6, phase 1.5). A sibling of Triage.
 //
-// The rubric in §4 is supposed to regress fitted scores on author, field, year,
-// type and length. Right now `year` sits on 3% of rows and `pages` on 2%, so
-// that regression would run on the author column alone. This view is how the
-// corpus gets the features, and it is deliberately NOT a batch job.
+// Built when §4 fitted a rubric to surface features and `year` sat on 3% of
+// rows. The 2026-08-11 revision lifted most of that pressure: an evaluator that
+// knows the literature needs the corpus to be identifiable, not feature-complete.
+// Year and pages still inform a cost estimate, so this stays useful — it is just
+// no longer a gate. It remains deliberately NOT a batch job.
 //
 // Why not a batch job, given the machine can match all 217 rows unattended:
 // Crossref, asked for a book by title, will happily return a three-page review
 // of that book by somebody else — same title, wrong author, wrong type, wrong
 // year, wrong DOI. Run unattended, that silently corrupts dozens of rows at
-// once and the damage is invisible until the rubric is already trained on it.
+// once, and the damage is invisible until something reasons from it.
 // So: one row at a time, the exact diff shown before anything is written, and
 // a keystroke to accept or skip. Fast, but never automatic.
 
@@ -20,9 +21,8 @@ import { lookup, applyCandidate, previewChanges, authorsAgree, describe, rankCan
 
 const SCOPES = {
   queue: { label: 'Queue first', test: t => t.status === 'queued' || t.status === 'reading' },
-  // The rubric trains on the read corpus and predicts on the queue, so features
-  // are needed on both. The pool is the part of the read corpus that will
-  // actually be compared, which makes it the shortest path to phase 2.
+  // The pool is the read corpus an evaluation is handed as context, so it is
+  // the subset most worth having clean.
   pool: { label: 'Comparison pool', test: t => inPool(t) },
   read: { label: 'Read corpus', test: t => t.status === 'read' },
   all: { label: 'Everything', test: t => t.status !== 'triage' },
@@ -36,7 +36,7 @@ const cache = new Map();      // id -> { state:'loading'|'done'|'error', candida
 const queries = new Map();    // id -> the query string, once the user has edited it
 let undoStack = [];
 
-/** Anything still missing a feature the rubric wants. */
+/** Anything still missing a field worth having. */
 function needsMetadata(t, children) {
   const suspectType = t.type === 'book' && !(children.get(t.id) || []).length;
   return t.year == null || t.pages == null || suspectType;
