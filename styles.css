@@ -575,3 +575,16 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
 .mark:hover { background: var(--surface-2); color: var(--ink); border-color: var(--ink-3); }
 .mark.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: var(--surface); }
 .mark.on:nth-child(2) { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+
+/* ── status filter checkboxes ────────────────────────────────────── */
+
+.status-filter {
+  display: flex; gap: .75rem; flex-wrap: wrap; align-items: center;
+  border: none; margin: 0; padding: 0;
+}
+.status-filter .check { font-size: .85rem; white-space: nowrap; }
+
+/* Start / Finish share the mark's slot and its restraint, but read as actions
+   rather than states, so they carry a border from the start. */
+.mark.act { color: var(--ink-2); border-color: var(--rule-2); }
+.mark.act:hover { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-soft); }

@@ -18,17 +18,35 @@ import { h, mount } from '../dom.js';
 import { state, savePrefs, mutate } from '../store.js';
 import {
   childIndex, byIdIndex, containerName, unreadPrerequisites, groupKey, MAX_DEPTH, descendantIds,
-  authorLine, priority, isScored, scores, sortKeyTitle, fold, matchesQuery,
+  authorLine, priority, isScored, scores, sortKeyTitle, fold, matchesQuery, todayISO,
 } from '../model.js';
 
-const SCOPES = {
-  active: { label: 'Queued + reading', test: t => t.status === 'queued' || t.status === 'reading' },
-  queued: { label: 'Queued', test: t => t.status === 'queued' },
-  reading: { label: 'Reading', test: t => t.status === 'reading' },
-  read: { label: 'Read', test: t => t.status === 'read' },
-  abandoned: { label: 'Abandoned', test: t => t.status === 'abandoned' },
-  all: { label: 'All', test: t => t.status !== 'triage' },
-};
+// Checkboxes, unioned — not a dropdown of preset combinations. A dropdown made
+// "queued" and "queued + reading" look like two unrelated modes when one is a
+// superset of the other, and it could not express "read and abandoned" at all.
+// `triage` is deliberately absent: it has its own view and is not a reading state.
+const STATUS_FILTERS = [
+  ['queued', 'Queued'],
+  ['reading', 'Reading'],
+  ['read', 'Read'],
+  ['abandoned', 'Abandoned'],
+];
+
+const DEFAULT_STATUSES = ['queued', 'reading'];
+
+/**
+ * Which statuses are showing. Migrates the single-scope key this replaced, so a
+ * saved preference from before the change still means what it used to.
+ */
+function statusesOf(f) {
+  if (Array.isArray(f.statuses)) return f.statuses;
+  const legacy = {
+    active: ['queued', 'reading'], queued: ['queued'], reading: ['reading'],
+    read: ['read'], abandoned: ['abandoned'],
+    all: ['queued', 'reading', 'read', 'abandoned'],
+  };
+  return legacy[f.status] || DEFAULT_STATUSES;
+}
 
 const SORTS = {
   smart: 'Priority, then date added',
@@ -46,15 +64,17 @@ export function renderQueue(root, ctx) {
   const children = childIndex(texts);
   const byId = byIdIndex(texts);
 
-  const scope = SCOPES[f.status] ? f.status : 'active';
-  const visible = texts.filter(SCOPES[scope].test).filter(t => matches(t, f, byId));
+  const statuses = statusesOf(f);
+  const inScope = t => statuses.includes(t.status);
+  const visible = texts.filter(inScope).filter(t => matches(t, f, byId));
   const ordered = sortRows(visible, prefs);
 
   const cols = visibleColumns(ordered, prefs);
   const anyScored = texts.some(isScored);
   const readingCount = texts.filter(t => t.status === 'reading').length;
   const triageCount = texts.filter(t => t.status === 'triage').length;
-  const inScopeTotal = texts.filter(SCOPES[scope].test).length;
+  const inScopeTotal = texts.filter(inScope).length;
+  const showsFinished = statuses.includes('read') || statuses.includes('abandoned');
 
   const drag = { byId, children, enabled: prefs.group !== false };
   const forest = prefs.group === false ? null : buildForest(ordered, byId, children);
@@ -65,18 +85,20 @@ export function renderQueue(root, ctx) {
     h('header.view-head',
       h('h1', 'Queue'),
       h('p.counts',
-        `${leafCount} of ${inScopeTotal} ${SCOPES[scope].label.toLowerCase()}`,
+        statuses.length
+          ? `${leafCount} of ${inScopeTotal} ${statuses.join(', ')}`
+          : 'no statuses selected',
         groupCount ? ` · ${groupCount} grouped under a parent` : null,
         triageCount ? [' · ', h('a', { href: '#/triage' }, `${triageCount} in triage`)] : null,
       ),
     ),
 
-    controls(prefs, scope, doc, ctx),
+    controls(prefs, statuses, doc, ctx),
 
     readingCount > 4 ? h('p.notice.quiet',
       `${readingCount} texts are open at once. Not a rule, just worth noticing.`) : null,
 
-    scope === 'read' || scope === 'all'
+    showsFinished
       ? (() => {
         const readable = texts.filter(t => t.status === 'read' || t.status === 'abandoned');
         const marked = readable.filter(t => t.assessment).length;
@@ -97,10 +119,10 @@ export function renderQueue(root, ctx) {
 
     ordered.length
       ? (forest
-        ? h('ol.rows', { role: 'list' }, forest.map(n => renderNode(n, { cols, prefs, byId, children, drag }, 0)))
+        ? h('ol.rows', { role: 'list' }, forest.map(n => renderNode(n, { cols, prefs, byId, children, drag, ctx }, 0)))
         : h('ol.rows', { role: 'list' },
-          ordered.map(t => h('li.group', row(t, { cols, prefs, byId, children, drag }, 0)))))
-      : emptyState(f, scope, inScopeTotal, ctx),
+          ordered.map(t => h('li.group', row(t, { cols, prefs, byId, children, drag, ctx }, 0)))))
+      : emptyState(f, statuses, inScopeTotal, ctx),
   );
 }
 
@@ -389,7 +411,7 @@ function unnestZone() {
   return zone;
 }
 
-function row(t, { cols, prefs, byId, children, drag }, depth = 0, childCount = 0) {
+function row(t, { cols, prefs, byId, children, drag, ctx }, depth = 0, childCount = 0) {
   const s = scores(t);
   const p = priority(t, prefs.w, prefs.alpha);
   const author = authorLine(t);
@@ -414,7 +436,7 @@ function row(t, { cols, prefs, byId, children, drag }, depth = 0, childCount = 0
       childCount ? h('span.container-of', `${childCount} inside`) : null,
     ),
     h('div.row-tags',
-      markControl(t),
+      rowActions(t, ctx),
       t.status === 'reading' ? h('span.tag.reading', 'Reading') : null,
       t.status === 'read' ? h('span.tag.read', 'Read') : null,
       t.status === 'abandoned' ? h('span.tag.abandoned', 'Abandoned') : null,
@@ -455,6 +477,45 @@ export function setAssessment(id, value) {
     if (value) row.assessment = value;
     else delete row.assessment;
   });
+}
+
+/**
+ * One action slot per row, whose content follows the status: advance while a
+ * text is in flight, mark it once it has landed. They never both apply, so the
+ * row gains a control rather than a cluster.
+ */
+function rowActions(t, ctx) {
+  if (t.status === 'queued') {
+    return h('span.mark-control',
+      h('button.mark.act', {
+        type: 'button', title: 'Move to reading, and record today as the start date',
+        onclick: (e) => {
+          e.preventDefault(); e.stopPropagation();
+          mutate(d => {
+            const row = d.texts.find(x => x.id === t.id);
+            row.status = 'reading';
+            if (!row.date_started) row.date_started = todayISO();
+          });
+        },
+      }, 'Start'));
+  }
+  if (t.status === 'reading') {
+    return h('span.mark-control',
+      h('button.mark.act', {
+        type: 'button', title: 'Move to read, and record today as the finish date',
+        onclick: (e) => {
+          e.preventDefault(); e.stopPropagation();
+          mutate(d => {
+            const row = d.texts.find(x => x.id === t.id);
+            row.status = 'read';
+            if (!row.date_finished) row.date_finished = todayISO();
+            if (!row.date_started) row.date_started = todayISO();
+          });
+          ctx.toast(`Finished “${(t.title || '').slice(0, 40)}”. Tick Read above to mark it good or bad.`);
+        },
+      }, 'Finish'));
+  }
+  return markControl(t);
 }
 
 function markControl(t) {
@@ -501,26 +562,40 @@ export function queueKeys(e, ctx) {
 
 // ── chrome ──────────────────────────────────────────────────────────
 
-function controls(prefs, scope, doc, ctx) {
+function controls(prefs, statuses, doc, ctx) {
   const f = prefs.filters;
   const setF = patch => savePrefs({ filters: { ...f, ...patch } });
   const projects = doc.projects || [];
   const texts = doc.texts || [];
   const types = [...new Set(texts.map(t => t.type))].sort();
 
-  // Counts in the labels, because "Active" and "Queued" are indistinguishable
-  // until something is actually being read, and a menu that looks like it has
-  // two names for one thing is worse than a longer label.
-  const scopeOptions = Object.entries(SCOPES).map(([k, v]) =>
-    [k, `${v.label} ${texts.filter(v.test).length}`]);
+  const toggleStatus = (key, on) => {
+    const next = on
+      ? [...new Set([...statuses, key])]
+      : statuses.filter(x => x !== key);
+    setF({ statuses: next, status: undefined });
+  };
+
+  const statusBoxes = h('fieldset.status-filter',
+    h('legend.sr-only', 'Statuses to show'),
+    STATUS_FILTERS.map(([key, label]) => {
+      const n = texts.filter(t => t.status === key).length;
+      return h('label.check',
+        h('input', {
+          type: 'checkbox', checked: statuses.includes(key),
+          onchange: e => toggleStatus(key, e.target.checked),
+        }),
+        h('span', label),
+        h('span.dim.tabular', ` ${n}`));
+    }));
 
   return h('div.controls',
+    statusBoxes,
     h('input.search', {
       type: 'search', id: 'q', placeholder: 'Search title, author, parent…',
       value: f.q, 'aria-label': 'Search',
       oninput: e => setF({ q: e.target.value }),
     }),
-    select('Show', scope, scopeOptions, v => setF({ status: v })),
     select('Sort', prefs.sort, Object.entries(SORTS), v => savePrefs({ sort: v })),
     types.length > 1
       ? select('Type', f.type, [['', 'Any type'], ...types.map(t => [t, t])], v => setF({ type: v }))
@@ -572,16 +647,23 @@ function slider(label, key, value, min, max, step, fmt) {
 
 // ── empty ───────────────────────────────────────────────────────────
 
-function emptyState(f, scope, total, ctx) {
+function emptyState(f, statuses, total, ctx) {
+  if (!statuses.length) {
+    return h('div.empty',
+      h('p', 'No statuses are selected, so nothing can show. Tick at least one above.'),
+      h('button', {
+        onclick: () => savePrefs({ filters: { ...f, statuses: DEFAULT_STATUSES } }),
+      }, 'Show queued and reading'));
+  }
   const filtering = f.q || f.type || f.project || f.familiarity !== '';
   if (filtering && total) {
     return h('div.empty',
-      h('p', `Nothing matches. ${total} ${SCOPES[scope].label.toLowerCase()} texts are hidden by the current filters.`),
+      h('p', `Nothing matches. ${total} ${statuses.join(' / ')} texts are hidden by the current filters.`),
       h('button', { onclick: () => savePrefs({ filters: { ...f, q: '', type: '', project: '', familiarity: '' } }) },
         'Clear filters'));
   }
   return h('div.empty',
-    h('p', `Nothing ${SCOPES[scope].label.toLowerCase()} yet.`),
+    h('p', `Nothing ${statuses.join(' or ')} yet.`),
     h('div.empty-actions',
       h('button', { onclick: () => ctx.newText() }, 'Add a text to the queue'),
       h('button', { onclick: () => ctx.quickLog() }, 'Log something you already read')));
