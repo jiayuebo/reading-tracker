@@ -252,9 +252,7 @@ function scoreSection(t, setIn, q) {
         scored ? null : 'Realized scores are for finished texts.'),
       scoreRow('Latent (fitted)', l, null, false, 'Written by the Bradley-Terry fit in phase 2.'),
     ),
-    (t.predicted || {}).reason
-      ? h('p.eval-reason', h('span.dim', 'why: '), t.predicted.reason)
-      : null,
+    reasonLines(t.predicted || {}),
     (t.predicted || {}).rubric_version
       ? h('p.hint.dim', `Scored ${t.predicted.date || ''} under prompt version ${t.predicted.rubric_version}.`)
       : null,
@@ -262,6 +260,15 @@ function scoreSection(t, setIn, q) {
       h('strong', q.label), ' — ', q.note,
     ) : h('p.hint.dim', 'The read/card quadrant appears once both value axes have numbers.'),
   );
+}
+
+/** `reason` is the pre-split single line; keep showing it on rows that have one. */
+function reasonLines(p) {
+  const abs = p.reason_abs || p.reason;
+  if (!abs && !p.reason_rel) return null;
+  return h('div.eval-reasons',
+    abs ? h('p.eval-reason', h('span.dim', 'absolute: '), abs) : null,
+    p.reason_rel ? h('p.eval-reason', h('span.dim', 'relative: '), p.reason_rel) : null);
 }
 
 function scoreRow(label, block, onset, editable, note) {

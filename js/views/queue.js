@@ -129,6 +129,9 @@ export function renderQueue(root, ctx) {
 // ── filtering ───────────────────────────────────────────────────────
 
 function matches(t, f, byId) {
+  // A restriction, not part of the status union: it narrows whatever statuses
+  // are showing rather than adding to them.
+  if (f.rereadOnly && !t.reread_wanted) return false;
   if (f.type && t.type !== f.type) return false;
   if (f.project && !(t.project_ids || []).includes(f.project)) return false;
   if (f.familiarity !== '' && f.familiarity != null && String(t.familiarity ?? '') !== String(f.familiarity)) return false;
@@ -418,6 +421,7 @@ function row(t, { cols, prefs, byId, children, drag, ctx }, depth = 0, childCoun
   const blocked = unreadPrerequisites(t, byId);
   const cont = depth === 0 ? containerName(t, byId) : null;
 
+  const finished = t.status === 'read' || t.status === 'abandoned';
   const meta = [author, t.year || null, t.journal || null,
     t.type !== 'article' ? t.type : null].filter(Boolean);
 
@@ -440,9 +444,11 @@ function row(t, { cols, prefs, byId, children, drag, ctx }, depth = 0, childCoun
       t.status === 'reading' ? h('span.tag.reading', 'Reading') : null,
       t.status === 'read' ? h('span.tag.read', 'Read') : null,
       t.status === 'abandoned' ? h('span.tag.abandoned', 'Abandoned') : null,
-      t.reread_wanted ? h('span.tag', 'Reread wanted') : null,
-      t.notes_written ? h('span.tag.soft', 'Notes') : null,
-      t.carded ? h('span.tag.soft', 'Cards') : null,
+      finished ? flagToggles(t) : [
+        t.reread_wanted ? h('span.tag', 'Reread wanted') : null,
+        t.notes_written ? h('span.tag.soft', 'Notes') : null,
+        t.carded ? h('span.tag.soft', 'Cards') : null,
+      ],
       (t.project_ids || []).length ? h('span.tag.soft', 'Project') : null,
       (t.shelves || []).map(sh => h('span.tag.soft', { title: sh }, sh.length > 22 ? sh.slice(0, 21) + '…' : sh)),
       blocked.length
@@ -516,6 +522,35 @@ function rowActions(t, ctx) {
       }, 'Finish'));
   }
   return markControl(t);
+}
+
+/**
+ * The three post-reading flags, toggled from the list.
+ *
+ * §3 insists these are independent booleans and not stages — a text can be
+ * carded without notes — so they are three separate toggles rather than a
+ * sequence. They only appear once a text is finished, because that is when
+ * there is anything to have written or carded.
+ */
+function flagToggles(t) {
+  const toggle = (key, label, title) =>
+    h(`button.mark.flag${t[key] ? '.on' : ''}`, {
+      type: 'button', title,
+      'aria-pressed': t[key] ? 'true' : 'false',
+      onclick: (e) => {
+        e.preventDefault(); e.stopPropagation();
+        mutate(d => {
+          const row = d.texts.find(x => x.id === t.id);
+          if (row[key]) delete row[key];
+          else row[key] = true;
+        });
+      },
+    }, label);
+  return [
+    toggle('notes_written', 'Notes', 'Notes written on this'),
+    toggle('carded', 'Cards', 'Flashcards made from this'),
+    toggle('reread_wanted', 'Reread', 'Worth returning to — see spec §4.5'),
+  ];
 }
 
 function markControl(t) {
@@ -610,8 +645,20 @@ function controls(prefs, statuses, doc, ctx) {
         onchange: e => savePrefs({ group: e.target.checked }),
       }),
       h('span', 'Nest under parents')),
-    (f.q || f.type || f.project || f.familiarity !== '')
-      ? h('button.link', { onclick: () => setF({ q: '', type: '', project: '', familiarity: '' }) }, 'Clear filters')
+    (() => {
+      const n = texts.filter(t => t.reread_wanted).length;
+      return h('label.check', { title: 'Only texts flagged as worth returning to' },
+        h('input', {
+          type: 'checkbox', checked: !!f.rereadOnly,
+          onchange: e => setF({ rereadOnly: e.target.checked }),
+        }),
+        h('span', 'Reread wanted'),
+        h('span.dim.tabular', ` ${n}`));
+    })(),
+    (f.q || f.type || f.project || f.familiarity !== '' || f.rereadOnly)
+      ? h('button.link', {
+        onclick: () => setF({ q: '', type: '', project: '', familiarity: '', rereadOnly: false }),
+      }, 'Clear filters')
       : null,
     h('span.spacer'),
     h('button', { onclick: () => ctx.newText() }, 'New text'),
@@ -629,8 +676,20 @@ function sliders(prefs) {
   return h('div.sliders',
     slider('Absolute weight', 'w', prefs.w, 0, 1, 0.05,
       v => `${Math.round(v * 100)}% absolute / ${Math.round((1 - v) * 100)}% relative`),
-    slider('Cost exponent', 'alpha', prefs.alpha, 0, 1.5, 0.05, v => `alpha ${v.toFixed(2)}`),
+    slider('Cost exponent', 'alpha', prefs.alpha, 0, 1.5, 0.05, alphaLabel),
   );
+}
+
+/**
+ * A bare exponent means nothing to read off a slider. What alpha actually
+ * controls is the exchange rate between hours and value: at alpha, a text that
+ * takes twice as long has to be 2^alpha times as valuable to rank equally.
+ * That number is the intuitive one, so show it.
+ */
+export function alphaLabel(a) {
+  const x = Math.pow(2, a);
+  if (a === 0) return 'alpha 0 · cost ignored entirely';
+  return `alpha ${a.toFixed(2)} · twice the hours needs ${x.toFixed(2)}x the value`;
 }
 
 function slider(label, key, value, min, max, step, fmt) {
@@ -655,12 +714,13 @@ function emptyState(f, statuses, total, ctx) {
         onclick: () => savePrefs({ filters: { ...f, statuses: DEFAULT_STATUSES } }),
       }, 'Show queued and reading'));
   }
-  const filtering = f.q || f.type || f.project || f.familiarity !== '';
+  const filtering = f.q || f.type || f.project || f.familiarity !== '' || f.rereadOnly;
   if (filtering && total) {
     return h('div.empty',
       h('p', `Nothing matches. ${total} ${statuses.join(' / ')} texts are hidden by the current filters.`),
-      h('button', { onclick: () => savePrefs({ filters: { ...f, q: '', type: '', project: '', familiarity: '' } }) },
-        'Clear filters'));
+      h('button', {
+        onclick: () => savePrefs({ filters: { ...f, q: '', type: '', project: '', familiarity: '', rereadOnly: false } }),
+      }, 'Clear filters'));
   }
   return h('div.empty',
     h('p', `Nothing ${statuses.join(' or ')} yet.`),

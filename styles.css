@@ -588,3 +588,10 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
    rather than states, so they carry a border from the start. */
 .mark.act { color: var(--ink-2); border-color: var(--rule-2); }
 .mark.act:hover { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-soft); }
+
+/* Flag toggles read as state, not as a verdict, so they stay neutral when on. */
+.mark.flag.on { color: var(--ink-2); border-color: var(--rule-2); background: var(--surface-2); }
+.mark.flag.on:nth-child(n) { color: var(--ink-2); }
+
+.unsaved-prompt { border-color: color-mix(in srgb, var(--warn) 40%, var(--rule)); }
+.eval-reasons { margin-top: .5rem; }

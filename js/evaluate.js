@@ -32,8 +32,14 @@ COST. Hours of effortful processing needed to extract the value: length x densit
 prerequisite load x inverse familiarity. Not difficulty, and not page count. A short
 dense paper can cost more than a long clear book.
 
-Give one line of "reason" per row, in concrete terms — what specifically makes it worth
-the hours, or not.
+Give a separate one-line reason for each of the two value axes:
+
+  "reason_abs" — why that absolute value. What would it cost not to have read this?
+  "reason_rel" — why that relative value, in terms of the projects below. If relative
+                 value is null, set this to null too rather than explaining an absence.
+
+Concrete in both cases: name the chapter, the argument, the move. "Canonical" is not a
+reason; "the source of the quasi-memory device the Vaporization case runs on" is.
 
 A BIAS YOU HAVE, WHICH YOU SHOULD CORRECT FOR. Your sense of what is worth reading
 tracks what the literature discusses most: canonical, heavily cited, anglophone,
@@ -57,7 +63,8 @@ ceiling — which is what absolute value is defined to measure.
 Return a JSON array and nothing else:
 
 [{"id": "some-row-id", "value_abs": 8.2, "value_rel": 6.4, "cost": 5.1,
-  "reason": "The locus classicus for the distinction the current paper attacks."}]
+  "reason_abs": "The locus classicus for the distinction between character and content.",
+  "reason_rel": "Section IV needs exactly this to make the teleosemantic defence go through."}]
 
 Use the exact "id" given. Omit any row you cannot judge rather than guessing at it.`;
 
@@ -243,9 +250,19 @@ export function parseScores(text, doc) {
       warnings.push(`"${id}" has no scores at all and will be skipped.`);
       return;
     }
-    const reason = String(item.reason || '').trim();
-    if (!reason) warnings.push(`"${id}" came back with no reason.`);
-    rows.push({ id, row: byId.get(id), scores, reason });
+    // Two reasons now, one per value axis. §4 says the axes decay at different
+    // rates — absolute is stable for years, relative goes stale within a term —
+    // so a relative-only rescore next term must be able to replace one without
+    // touching the other. A single blended sentence could not be split later.
+    // `reason` is still accepted: the first pass was scored under a prompt that
+    // asked for one, and those rows should not be treated as unexplained.
+    const reasonAbs = String(item.reason_abs || item.reason || '').trim();
+    const reasonRel = String(item.reason_rel || '').trim();
+    if (!reasonAbs) warnings.push(`"${id}" came back with no reason for absolute value.`);
+    if (scores.value_rel != null && !reasonRel) {
+      warnings.push(`"${id}" has a relative score but no reason for it.`);
+    }
+    rows.push({ id, row: byId.get(id), scores, reasonAbs, reasonRel });
   });
 
   if (!rows.length && !errors.length) errors.push('Nothing usable in that paste.');
@@ -262,18 +279,24 @@ export function scoreDiff(entry) {
     if (before === after) continue;
     out.push({ field: axis, from: before, to: after });
   }
-  if ((cur.reason || '') !== entry.reason && entry.reason) {
-    out.push({ field: 'reason', from: cur.reason || null, to: entry.reason });
+  const curAbs = cur.reason_abs || cur.reason || '';
+  if (entry.reasonAbs && curAbs !== entry.reasonAbs) {
+    out.push({ field: 'reason_abs', from: curAbs || null, to: entry.reasonAbs });
+  }
+  if (entry.reasonRel && (cur.reason_rel || '') !== entry.reasonRel) {
+    out.push({ field: 'reason_rel', from: cur.reason_rel || null, to: entry.reasonRel });
   }
   return out;
 }
 
 /** Build the `predicted` block a row should end up with. */
 export function predictedBlock(entry, version) {
-  return {
+  const out = {
     ...entry.scores,
     date: todayISO(),
     rubric_version: version,
-    reason: entry.reason || null,
+    reason_abs: entry.reasonAbs || null,
   };
+  if (entry.reasonRel) out.reason_rel = entry.reasonRel;
+  return out;
 }

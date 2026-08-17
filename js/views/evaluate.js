@@ -73,9 +73,27 @@ function contextWarnings(doc) {
 
 function promptCard(doc, version, ctx) {
   const current = promptOf(doc);
+  const stored = ((doc.rubric || {}).prose || '').trim();
+  const unsaved = !stored;
   if (!editingPrompt) {
-    return h('details.card',
-      h('summary', `Prompt — version ${version}`),
+    return h(`details.card${unsaved ? '.unsaved-prompt' : ''}`, { open: unsaved },
+      h('summary', `Prompt — version ${version}${unsaved ? ' · NOT SAVED' : ''}`),
+      unsaved
+        ? h('p.notice.warn',
+          'This is the built-in default and nothing is stored in the file, so any score written '
+          + `as version ${version} points at text that could change under it. Save it to pin the `
+          + 'version — that is what makes a later pass commensurable with an earlier one.',
+          h('div.actions',
+            h('button.primary', {
+              onclick: () => {
+                mutate(d => {
+                  d.rubric = { version: rubricVersion(d), date: todayISO(), prose: promptOf(d) };
+                });
+                ctx.toast(`Prompt pinned as version ${rubricVersion(state.doc)}.`);
+                ctx.rerender();
+              },
+            }, `Save this as version ${version}`)))
+        : null,
       h('p.hint', 'The instrument, not a passing instruction: the same text every pass, so ten '
         + 'rows scored in March are commensurable with sixty scored in January. Edit it when an '
         + 'audit or the calibration view gives you a named bias to write against — not because a '
@@ -95,15 +113,24 @@ function promptCard(doc, version, ctx) {
         onclick: () => {
           const text = box.value.trim();
           if (!text) { alert('The prompt cannot be empty.'); return; }
-          if (text === current) { editingPrompt = false; ctx.rerender(); return; }
+          // Compare against what is STORED, not against what is displayed. They
+          // differ on the first save, when the box shows the built-in default
+          // and the file holds nothing: comparing to the displayed text made
+          // "open the editor and press save" a silent no-op, which is precisely
+          // how someone pins version 1.
+          const stored = ((state.doc.rubric || {}).prose || '').trim();
+          if (text === stored) { editingPrompt = false; ctx.rerender(); return; }
+          // First save is version 1, not 2 — scores already written under the
+          // default carry rubric_version 1 and must keep pointing at real text.
           mutate(d => {
-            d.rubric = { version: rubricVersion(d) + 1, date: todayISO(), prose: text };
+            const next = stored ? rubricVersion(d) + 1 : rubricVersion(d);
+            d.rubric = { version: next, date: todayISO(), prose: text };
           });
           editingPrompt = false;
           ctx.toast(`Prompt saved as version ${rubricVersion(state.doc)}.`);
           ctx.rerender();
         },
-      }, 'Save as a new version'),
+      }, 'Save prompt'),
       h('button', { onclick: () => { editingPrompt = false; ctx.rerender(); } }, 'Cancel'),
       h('button', {
         onclick: () => { box.value = DEFAULT_PROMPT; },
@@ -200,7 +227,8 @@ function review({ rows, errors, warnings }, version, ctx) {
             h('div.eval-head',
               h('a', { href: `#/text/${encodeURIComponent(r.id)}` }, r.row.title || r.id),
               diff.length ? null : h('span.dim.small', ' — no change')),
-            r.reason ? h('p.eval-reason', r.reason) : h('p.hint.dim', 'no reason given'),
+            r.reasonAbs ? h('p.eval-reason', h('span.dim', 'abs: '), r.reasonAbs) : h('p.hint.dim', 'no absolute reason'),
+            r.reasonRel ? h('p.eval-reason', h('span.dim', 'rel: '), r.reasonRel) : null,
             diff.length
               ? h('ul.diff', diff.map(d => h('li',
                 h('span.diff-field', d.field), ' ',

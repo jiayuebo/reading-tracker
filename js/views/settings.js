@@ -103,7 +103,10 @@ export function renderSettings(root, ctx) {
           h('p.hint', 'value = w·absolute + (1−w)·relative. Starts high on absolute and shifts down the degree.')),
         h('div.field', h('label', { for: 'alpha' }, 'Cost exponent (alpha)'),
           h('input#alpha', { type: 'number', min: 0, max: 1.5, step: 0.05, value: state.prefs.alpha, onchange: e => savePrefs({ alpha: clamp(e.target.value, 0, 1.5, 0.7) }) }),
-          h('p.hint', 'priority = value ÷ cost^alpha. Below 1 it corrects the bias toward short shallow items.')),
+          h('p.hint', 'priority = value ÷ cost^alpha. Read it as an exchange rate between hours and '
+            + 'value: a text that takes twice as long has to be 2^alpha times as valuable to rank '
+            + 'equally. At 1 that is 2x — pure value per hour, which systematically favours short '
+            + 'things. At 0.7 it is 1.62x. At 0 cost is ignored entirely.')),
       ),
     ),
 
