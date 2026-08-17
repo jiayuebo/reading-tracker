@@ -253,13 +253,27 @@ function scoreSection(t, setIn, q) {
       scoreRow('Latent (fitted)', l, null, false, 'Written by the Bradley-Terry fit in phase 2.'),
     ),
     reasonLines(t.predicted || {}),
-    (t.predicted || {}).rubric_version
-      ? h('p.hint.dim', `Scored ${t.predicted.date || ''} under prompt version ${t.predicted.rubric_version}.`)
-      : null,
+    scoreProvenance(t.predicted || {}),
     q ? h('div.quadrant', { dataset: { q: q.key } },
       h('strong', q.label), ' — ', q.note,
     ) : h('p.hint.dim', 'The read/card quadrant appears once both value axes have numbers.'),
   );
+}
+
+/**
+ * After a relative-only pass the two axes come from different prompt versions,
+ * so one line for the row would be false. Say each separately when they differ.
+ */
+function scoreProvenance(p) {
+  if (!p.rubric_version && !p.abs_version && !p.rel_version) return null;
+  const a = p.abs_version || p.rubric_version;
+  const r = p.rel_version;
+  if (r && a && r !== a) {
+    return h('p.hint.dim',
+      `Absolute scored ${p.abs_date || p.date || ''} under prompt v${a}; `
+      + `relative rescored ${p.rel_date || ''} under v${r}.`);
+  }
+  return h('p.hint.dim', `Scored ${p.date || ''} under prompt version ${a || p.rubric_version}.`);
 }
 
 /** `reason` is the pre-split single line; keep showing it on rows that have one. */

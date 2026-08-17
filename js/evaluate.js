@@ -92,6 +92,15 @@ export const TARGET_SCOPES = {
       && (t.predicted || {}).value_abs == null,
   },
   queue: { label: 'Everything queued', test: t => t.status === 'queued' || t.status === 'reading' },
+  // §4: only the relative component goes stale between terms. The absolute
+  // rubric can stand for years, so re-running the whole thing each term would
+  // churn scores that were fine and lose their provenance for no gain.
+  relative: {
+    label: 'Already scored — relative value only',
+    relativeOnly: true,
+    test: t => (t.status === 'queued' || t.status === 'reading')
+      && (t.predicted || {}).value_abs != null,
+  },
 };
 
 function bib(t) {
@@ -111,13 +120,21 @@ function corpusLine(t) {
   return parts.join(' ');
 }
 
-function targetLine(t, byId) {
+function targetLine(t, byId, relativeOnly) {
   const parts = [`- id: ${t.id}`, `"${t.title}"`];
   const b = bib(t);
   if (b) parts.push(`— ${b}`);
   const parent = t.parent_id && byId.get(t.parent_id);
   if (parent) parts.push(`[in: ${parent.title}]`);
   else if (t.container) parts.push(`[in: ${t.container}]`);
+  if (relativeOnly) {
+    // Carry the standing absolute score and cost so they are not re-derived,
+    // and so an obviously wrong one can be spotted rather than silently kept.
+    const p = t.predicted || {};
+    parts.push(`\n    standing: absolute ${p.value_abs}, cost ${p.cost}`
+      + (p.value_rel != null ? `, relative ${p.value_rel} (v${p.rel_version || p.rubric_version || '?'})` : ', relative not set'));
+    if (p.reason_abs || p.reason) parts.push(`\n    absolute reason: ${p.reason_abs || p.reason}`);
+  }
   return parts.join(' ');
 }
 
@@ -173,9 +190,20 @@ export function buildExport(doc, { corpusScope = 'pool', targetScope = 'unscored
     + `not evaluated — not average._\n`);
   for (const t of corpus) out.push(corpusLine(t));
 
+  const relativeOnly = !!TARGET_SCOPES[targetScope].relativeOnly;
   out.push(`\n\n## 4. To score — ${targets.length} rows\n`);
-  for (const t of targets) out.push(targetLine(t, byId));
-  out.push('\nReturn a JSON array covering these ids and nothing else.');
+  if (relativeOnly) {
+    out.push('**Relative value only.** These rows already carry an absolute value and a cost from '
+      + 'an earlier pass, shown beneath each. Absolute value is stable and is NOT being '
+      + 'reconsidered — do not return `value_abs`, `cost`, or `reason_abs`, and do not comment on '
+      + 'them. Return only `value_rel` and `reason_rel`, judged against the project context in '
+      + 'section 2 as it stands today. Omitting a field leaves it untouched; returning it as null '
+      + 'clears it.\n');
+  }
+  for (const t of targets) out.push(targetLine(t, byId, relativeOnly));
+  out.push(relativeOnly
+    ? '\nReturn a JSON array of {id, value_rel, reason_rel} and nothing else.'
+    : '\nReturn a JSON array covering these ids and nothing else.');
 
   return out.join('\n');
 }
@@ -237,17 +265,24 @@ export function parseScores(text, doc) {
     if (seen.has(id)) { errors.push(`${where}: "${id}" appears more than once.`); return; }
     seen.add(id);
 
+    // An absent key and an explicit null mean different things, and conflating
+    // them is how a relative-only rescore would wipe every absolute score.
+    // Absent: leave whatever is on the row alone. Explicit null: clear it —
+    // which is what the prompt asks for when there is no project context.
     const scores = {};
+    const given = {};
     for (const axis of AXES) {
+      if (!Object.prototype.hasOwnProperty.call(item, axis)) continue;
+      given[axis] = true;
       const v = item[axis];
-      if (v == null) { scores[axis] = null; continue; }
+      if (v === null) { scores[axis] = null; continue; }
       const n = Number(v);
       if (!Number.isFinite(n)) { errors.push(`${where} ("${id}"): ${axis} is not a number.`); return; }
       if (n < 0 || n > 10) { errors.push(`${where} ("${id}"): ${axis} is ${n}, outside 0–10.`); return; }
       scores[axis] = n;
     }
-    if (AXES.every(a => scores[a] == null)) {
-      warnings.push(`"${id}" has no scores at all and will be skipped.`);
+    if (!Object.keys(given).length) {
+      warnings.push(`"${id}" mentions no scores at all and will be skipped.`);
       return;
     }
     // Two reasons now, one per value axis. §4 says the axes decay at different
@@ -258,11 +293,13 @@ export function parseScores(text, doc) {
     // asked for one, and those rows should not be treated as unexplained.
     const reasonAbs = String(item.reason_abs || item.reason || '').trim();
     const reasonRel = String(item.reason_rel || '').trim();
-    if (!reasonAbs) warnings.push(`"${id}" came back with no reason for absolute value.`);
-    if (scores.value_rel != null && !reasonRel) {
+    if (given.value_abs && !reasonAbs) {
+      warnings.push(`"${id}" came back with no reason for absolute value.`);
+    }
+    if (given.value_rel && scores.value_rel != null && !reasonRel) {
       warnings.push(`"${id}" has a relative score but no reason for it.`);
     }
-    rows.push({ id, row: byId.get(id), scores, reasonAbs, reasonRel });
+    rows.push({ id, row: byId.get(id), scores, given, reasonAbs, reasonRel });
   });
 
   if (!rows.length && !errors.length) errors.push('Nothing usable in that paste.');
@@ -274,6 +311,7 @@ export function scoreDiff(entry) {
   const cur = entry.row.predicted || {};
   const out = [];
   for (const axis of AXES) {
+    if (!entry.given[axis]) continue;          // untouched, so not a change
     const before = cur[axis] == null ? null : Number(cur[axis]);
     const after = entry.scores[axis];
     if (before === after) continue;
@@ -290,13 +328,37 @@ export function scoreDiff(entry) {
 }
 
 /** Build the `predicted` block a row should end up with. */
+/**
+ * Merge onto whatever is already there, rather than replacing it.
+ *
+ * This is what makes §4's asymmetry workable. Absolute value is stable for
+ * years; relative value is project-indexed and stale within a term. So a termly
+ * pass must be able to rewrite relative value and leave absolute alone — which
+ * a wholesale replacement cannot do, because the fields it was not given would
+ * come back null.
+ *
+ * Each axis also records the prompt version that produced it, since after a
+ * partial pass a single `rubric_version` for the row would be a lie: the
+ * absolute score came from one generation and the relative from another.
+ */
 export function predictedBlock(entry, version) {
-  const out = {
-    ...entry.scores,
-    date: todayISO(),
-    rubric_version: version,
-    reason_abs: entry.reasonAbs || null,
-  };
-  if (entry.reasonRel) out.reason_rel = entry.reasonRel;
+  const out = { ...(entry.row.predicted || {}) };
+  for (const axis of AXES) {
+    if (entry.given[axis]) out[axis] = entry.scores[axis];
+  }
+  if (entry.given.value_abs) {
+    if (entry.reasonAbs) out.reason_abs = entry.reasonAbs;
+    out.abs_version = version;
+    out.abs_date = todayISO();
+  }
+  if (entry.given.value_rel) {
+    if (entry.reasonRel) out.reason_rel = entry.reasonRel;
+    else if (entry.scores.value_rel === null) delete out.reason_rel;
+    out.rel_version = version;
+    out.rel_date = todayISO();
+  }
+  if (entry.given.cost) { out.cost_version = version; }
+  out.date = todayISO();
+  out.rubric_version = version;      // the most recent pass to touch this row
   return out;
 }

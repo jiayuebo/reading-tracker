@@ -227,8 +227,11 @@ function review({ rows, errors, warnings }, version, ctx) {
             h('div.eval-head',
               h('a', { href: `#/text/${encodeURIComponent(r.id)}` }, r.row.title || r.id),
               diff.length ? null : h('span.dim.small', ' — no change')),
-            r.reasonAbs ? h('p.eval-reason', h('span.dim', 'abs: '), r.reasonAbs) : h('p.hint.dim', 'no absolute reason'),
+            r.reasonAbs ? h('p.eval-reason', h('span.dim', 'abs: '), r.reasonAbs) : null,
             r.reasonRel ? h('p.eval-reason', h('span.dim', 'rel: '), r.reasonRel) : null,
+            // Only complain about a missing reason for an axis that was actually scored;
+            // a relative-only pass is not silent about absolute, it is not asked.
+            (r.given.value_abs && !r.reasonAbs) ? h('p.hint.dim', 'no absolute reason given') : null,
             diff.length
               ? h('ul.diff', diff.map(d => h('li',
                 h('span.diff-field', d.field), ' ',
