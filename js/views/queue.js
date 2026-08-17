@@ -76,6 +76,17 @@ export function renderQueue(root, ctx) {
     readingCount > 4 ? h('p.notice.quiet',
       `${readingCount} texts are open at once. Not a rule, just worth noticing.`) : null,
 
+    scope === 'read' || scope === 'all'
+      ? (() => {
+        const readable = texts.filter(t => t.status === 'read' || t.status === 'abandoned');
+        const marked = readable.filter(t => t.assessment).length;
+        return h('p.notice.quiet',
+          `${marked} of ${readable.length} read texts carry a good/bad mark. `,
+          h('kbd', '1'), ' good · ', h('kbd', '2'), ' bad · ', h('kbd', '0'), ' clear, on the focused row. ',
+          'Good means the hours paid, not that you enjoyed it. Unmarked means not evaluated, and is never read as average.');
+      })()
+      : null,
+
     !anyScored ? h('p.notice.quiet',
       'No scores yet. Sorted by date added; value and cost can be typed in by hand on any text, and the priority sort switches on by itself once they exist.',
     ) : null,
@@ -392,13 +403,18 @@ function row(t, { cols, prefs, byId, children, drag }, depth = 0, childCount = 0
     drag && drag.enabled
       ? h('span.drag-handle', { 'aria-hidden': 'true', title: 'Drag onto another row to nest it' }, '\u283F')
       : null,
-    h('a.row-main', { href: `#/text/${encodeURIComponent(t.id)}` },
+    // The id is what lets app.js restore focus across the re-render that every
+    // edit triggers. Without it, marking a row with the keyboard drops focus and
+    // the next `j` jumps back to the top of the list — which defeats running
+    // down the read list marking as you go.
+    h('a.row-main', { id: `row-${t.id}`, href: `#/text/${encodeURIComponent(t.id)}` },
       h('span.title', t.title || '(untitled)'),
       meta.length ? h('span.meta', meta.join(' · ')) : null,
       cont ? h('span.container-of', 'in ', h('em', cont)) : null,
       childCount ? h('span.container-of', `${childCount} inside`) : null,
     ),
     h('div.row-tags',
+      markControl(t),
       t.status === 'reading' ? h('span.tag.reading', 'Reading') : null,
       t.status === 'read' ? h('span.tag.read', 'Read') : null,
       t.status === 'abandoned' ? h('span.tag.abandoned', 'Abandoned') : null,
@@ -423,11 +439,65 @@ function row(t, { cols, prefs, byId, children, drag }, depth = 0, childCount = 0
   ), t, drag);
 }
 
+/**
+ * The good/bad mark, inline (spec §4).
+ *
+ * It lives here and not only on the detail view because the marks are the one
+ * input an outside evaluation cannot get anywhere else, and they only get made
+ * if making one costs a single click from the list. Sparse: clearing removes the
+ * key rather than storing `false`, because absence is a real third state —
+ * "not evaluated", never "average".
+ */
+export function setAssessment(id, value) {
+  mutate(d => {
+    const row = d.texts.find(x => x.id === id);
+    if (!row) return;
+    if (value) row.assessment = value;
+    else delete row.assessment;
+  });
+}
+
+function markControl(t) {
+  if (t.status !== 'read' && t.status !== 'abandoned') return null;
+  const btn = (value, label, title) =>
+    h(`button.mark${t.assessment === value ? '.on' : ''}`, {
+      type: 'button',
+      title,
+      'aria-pressed': t.assessment === value ? 'true' : 'false',
+      onclick: (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setAssessment(t.id, t.assessment === value ? null : value);
+      },
+    }, label);
+  return h('span.mark-control',
+    btn('good', 'Good', 'Worth the hours — you would have regretted missing it. Not whether you enjoyed it.'),
+    btn('bad', 'Bad', 'The hours did not pay.'));
+}
+
 function num(v, cls) {
   return h(`span.n.tabular${cls ? '.' + cls : ''}`, v === '' || v == null ? h('span.absent', '·') : v);
 }
 
 function fmt1(v) { return v == null ? '' : Number(v).toFixed(1); }
+
+/**
+ * 1 / 2 / 0 mark the focused row, so a pass down the read list with j and k
+ * never needs the mouse. Numeric keys to match Backfill's accept keys.
+ */
+export function queueKeys(e, ctx) {
+  if (!'120'.includes(e.key)) return false;
+  const el = document.activeElement && document.activeElement.closest
+    ? document.activeElement.closest('.row')
+    : null;
+  if (!el || !el.dataset.id) return false;
+  const t = (state.doc.texts || []).find(x => x.id === el.dataset.id);
+  if (!t || (t.status !== 'read' && t.status !== 'abandoned')) return false;
+  e.preventDefault();
+  setAssessment(t.id, e.key === '1' ? 'good' : e.key === '2' ? 'bad' : null);
+  ctx.rerender();
+  return true;
+}
 
 // ── chrome ──────────────────────────────────────────────────────────
 

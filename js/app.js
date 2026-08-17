@@ -5,7 +5,7 @@ import { h, mount, clear, isTyping } from './dom.js';
 import {
   state, settings, load, save, subscribe, installGuards, resolveRestore, startEmpty,
 } from './store.js';
-import { renderQueue } from './views/queue.js';
+import { renderQueue, queueKeys } from './views/queue.js';
 import { renderTriage } from './views/triage.js';
 import { renderBackfill, backfillKeys } from './views/backfill.js';
 import { renderPool } from './views/pool.js';
@@ -238,6 +238,7 @@ function keys(e) {
   // The active view gets first refusal on a key, so Backfill can bind 1-5/s/u
   // without those becoming global shortcuts everywhere else.
   if (route().name === 'backfill' && backfillKeys(e, ctx)) return;
+  if (route().name === 'queue' && queueKeys(e, ctx)) return;
 
   switch (e.key) {
     case 'g': pendingG = true; setTimeout(() => { pendingG = false; }, 900); break;
@@ -266,6 +267,9 @@ function keys(e) {
 }
 
 // ── boot ────────────────────────────────────────────────────────────
+
+// Tells the boot guard in index.html that the module graph loaded and ran.
+window.__trackerBooted = true;
 
 subscribe(schedule);
 window.addEventListener('hashchange', schedule);

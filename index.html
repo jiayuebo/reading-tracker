@@ -40,5 +40,39 @@
 </noscript>
 
 <script type="module" src="js/app.js"></script>
+<script>
+// Boot guard. Not a module, so it runs even when the module graph fails to load.
+//
+// GitHub Pages serves with a ten-minute cache, so shortly after a deploy a
+// browser can hold a stale copy of one file and a fresh copy of another. When
+// the two disagree about an export, the entry module throws before rendering
+// anything and the page is simply blank with an error only in the console.
+// A blank page that says nothing is the worst possible failure for a tool you
+// rely on daily, so say something.
+(function () {
+  var GRACE_MS = 6000;
+  setTimeout(function () {
+    if (window.__trackerBooted) return;
+    var view = document.getElementById('view');
+    if (!view || view.children.length) return;
+    view.innerHTML = '';
+    var box = document.createElement('div');
+    box.className = 'welcome';
+    box.innerHTML =
+      '<h1>The app did not start</h1>'
+      + '<p>Most often this is a stale cached copy of one file alongside a fresh copy of '
+      + 'another, right after an update. A hard refresh usually fixes it: '
+      + '<kbd>Shift</kbd> and reload, or <kbd>Cmd</kbd><kbd>Shift</kbd><kbd>R</kbd>.</p>'
+      + '<p class="hint">If it persists, the browser console will name the file. '
+      + 'Your data is untouched — it lives in the private repository, not in this page.</p>';
+    var btn = document.createElement('button');
+    btn.className = 'primary';
+    btn.textContent = 'Reload';
+    btn.onclick = function () { location.reload(true); };
+    box.appendChild(btn);
+    view.appendChild(box);
+  }, GRACE_MS);
+})();
+</script>
 </body>
 </html>

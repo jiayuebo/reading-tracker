@@ -220,6 +220,7 @@ export function helpDialog() {
     ['g then s', 'Settings'],
     ['/', 'Focus search'], ['n', 'New text'], ['l', 'Quick-log'],
     ['j / k', 'Move down / up the list'], ['Enter', 'Open the focused row'],
+    ['1 / 2 / 0', 'Queue: mark the focused read row good / bad / unmarked'],
     ['1 – 5', 'Backfill: accept that match'], ['s / x / u', 'Backfill: skip / nothing to find / undo'],
     ['Cmd/Ctrl S', 'Save now'], ['?', 'This help'], ['Esc', 'Close'],
   ];
