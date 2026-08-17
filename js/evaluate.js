@@ -306,6 +306,30 @@ export function parseScores(text, doc) {
   return { rows, errors, warnings };
 }
 
+/**
+ * Narrow an entry to the relative axis only.
+ *
+ * The export scope shapes the document that goes out; it does not constrain
+ * what comes back. An evaluator that ignores "do not return value_abs" would
+ * otherwise overwrite a standing absolute score, and across sixty-odd rows that
+ * is a lot of diff lines to catch. Applying this makes the mode mean what its
+ * name says, and it is applied before the diff so the preview shows exactly
+ * what will be written.
+ */
+export function restrictToRelative(entry) {
+  return {
+    ...entry,
+    given: { value_rel: !!entry.given.value_rel },
+    scores: { value_rel: entry.scores.value_rel },
+    reasonAbs: '',
+  };
+}
+
+/** Which entries carried axes a relative-only pass did not ask for. */
+export function extraAxes(rows) {
+  return rows.filter(r => r.given.value_abs || r.given.cost);
+}
+
 /** What each row would change, for display before applying. */
 export function scoreDiff(entry) {
   const cur = entry.row.predicted || {};

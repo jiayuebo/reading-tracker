@@ -8,7 +8,7 @@ import { h, mount } from '../dom.js';
 import { state, mutate } from '../store.js';
 import {
   buildExport, parseScores, scoreDiff, predictedBlock, promptOf, rubricVersion,
-  DEFAULT_PROMPT, CORPUS_SCOPES, TARGET_SCOPES,
+  DEFAULT_PROMPT, CORPUS_SCOPES, TARGET_SCOPES, restrictToRelative, extraAxes,
 } from '../evaluate.js';
 import { todayISO } from '../model.js';
 
@@ -17,6 +17,7 @@ let targetScope = 'unscored';
 let parsed = null;          // { rows, errors, warnings } awaiting confirmation
 let pasteText = '';
 let editingPrompt = false;
+let ignoreExtraAxes = true;   // when a relative-only pass returns more than it was asked for
 
 export function renderEvaluate(root, ctx) {
   const doc = state.doc;
@@ -201,9 +202,29 @@ function pasteCard(doc, version, ctx) {
   );
 }
 
-function review({ rows, errors, warnings }, version, ctx) {
+function review({ rows: raw, errors, warnings }, version, ctx) {
+  const relativeOnly = !!TARGET_SCOPES[targetScope].relativeOnly;
+  const overreaching = relativeOnly ? extraAxes(raw) : [];
+  const rows = (relativeOnly && ignoreExtraAxes) ? raw.map(restrictToRelative) : raw;
   const applicable = rows.filter(r => scoreDiff(r).length);
   return h('div.review',
+    overreaching.length
+      ? h('div.notice.warn',
+        h('p',
+          h('strong', `${overreaching.length} row${overreaching.length === 1 ? '' : 's'} came back `
+            + 'with an absolute value or a cost'),
+          ', which this pass did not ask for. Absolute value is meant to stand between terms.'),
+        h('label.check',
+          h('input', {
+            type: 'checkbox', checked: ignoreExtraAxes,
+            onchange: e => { ignoreExtraAxes = e.target.checked; ctx.rerender(); },
+          }),
+          h('span', 'Ignore them and write only relative value')),
+        ignoreExtraAxes
+          ? null
+          : h('p.hint', 'Unticked, the standing absolute scores below will be overwritten. '
+            + 'Read the diff before applying.'))
+      : null,
     errors.length
       ? h('div.notice.warn',
         h('p', h('strong', `${errors.length} problem${errors.length === 1 ? '' : 's'}.`),
