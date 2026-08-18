@@ -10,7 +10,7 @@
 // So this module does two things: build one self-contained document to hand
 // over, and validate what comes back before a single field is written.
 
-import { authorLine, sortKeyTitle, todayISO } from './model.js';
+import { authorLine, sortKeyTitle, todayISO, masteryLabel } from './model.js';
 
 /** Seeded into `rubric.prose` the first time, then edited in the Evaluate view. */
 export const DEFAULT_PROMPT = `You are helping a philosophy PhD student decide what to read next, and what is worth
@@ -180,7 +180,22 @@ export function buildExport(doc, { corpusScope = 'pool', targetScope = 'unscored
     out.push('\n### Subjects being learned\n');
     for (const sub of subjects) {
       const goal = (sub.goal || '').trim();
-      out.push(`- ${sub.name} (${sub.status || 'active'})${goal ? ` — ${goal}` : ' — no goal recorded'}`);
+      out.push(`\n**${sub.name}** (${sub.status || 'active'})${goal ? ` — ${goal}` : ' — no goal recorded'}`);
+      const topics = sub.topics || [];
+      if (topics.length) {
+        // Where the reader already stands matters more than the topic list: a
+        // text on something at "can use" is worth much less to them than one on
+        // something at "unfamiliar", and only they know which is which.
+        const target = sub.target_mastery ?? 2;
+        out.push(`  target mastery ${target} (${masteryLabel(target)}); `
+          + `${topics.filter(t => Number(t.mastery || 0) >= target).length} of ${topics.length} there.`);
+        for (const tp of topics) {
+          out.push(`  - ${tp.name} — ${tp.mastery || 0} ${masteryLabel(tp.mastery)}`
+            + ((tp.note || '').trim() ? ` (${tp.note.trim()})` : ''));
+        }
+      }
+      const res = (sub.resources || []).filter(r => !r.done);
+      if (res.length) out.push(`  outstanding: ${res.map(r => r.name).join('; ')}`);
     }
   }
 

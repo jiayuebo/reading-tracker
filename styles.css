@@ -595,3 +595,44 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
 
 .unsaved-prompt { border-color: color-mix(in srgb, var(--warn) 40%, var(--rule)); }
 .eval-reasons { margin-top: .5rem; }
+
+/* ── subjects ────────────────────────────────────────────────────── */
+
+.subject-list { display: flex; flex-direction: column; gap: .9rem; }
+.subject-card {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent); border-radius: var(--r); padding: .85rem 1rem;
+}
+.subject-head { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+.subject-title { font-family: var(--display); font-size: 1.15rem; text-decoration: none; color: inherit; }
+.subject-title:hover { text-decoration: underline; }
+.subject-goal { margin: .35rem 0 .2rem; font-size: .9rem; color: var(--ink-2); }
+.subject-goal.missing { color: var(--warn); }
+
+/* One pip per topic, shaded by mastery. A strip, not a bar: it shows the shape
+   of what is known, and cannot be made to look fuller by splitting a topic. */
+.mastery-strip { display: flex; gap: 2px; margin-top: .5rem; flex-wrap: wrap; }
+.pip { width: 14px; height: 6px; border-radius: 1px; background: var(--rule-2); }
+.pip.m1 { background: color-mix(in srgb, var(--accent) 35%, var(--rule-2)); }
+.pip.m2 { background: color-mix(in srgb, var(--accent) 70%, var(--rule-2)); }
+.pip.m3 { background: var(--ok); }
+
+.topic-list, .resource-list { list-style: none; margin: 0; padding: 0; }
+.topic-row { border-top: 1px solid var(--rule); padding: .6rem 0; }
+.topic-main { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.topic-name { flex: 1 1 16rem; font-family: var(--display); font-size: .98rem; }
+.topic-note { width: 100%; margin-top: .35rem; font-size: .84rem; }
+.topic-texts { margin: .35rem 0 0; font-size: .82rem; }
+.topic-attach { margin-top: .4rem; }
+.topic-attach summary { cursor: pointer; color: var(--ink-3); }
+
+.mastery-control { display: inline-flex; gap: .15rem; }
+.mark.mastery { min-width: 1.7rem; text-align: center; border-color: var(--rule-2); color: var(--ink-3); }
+.mark.mastery.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+@media (prefers-color-scheme: dark) { .mark.mastery.on { color: #10141a; } }
+
+.resource-row {
+  display: flex; gap: .6rem; align-items: center; flex-wrap: wrap;
+  border-top: 1px solid var(--rule); padding: .4rem 0;
+}
+.resource-row .check { flex: 1 1 18rem; }

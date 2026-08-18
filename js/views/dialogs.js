@@ -216,7 +216,7 @@ function downloadText(text, filename) {
 /** Keyboard help. */
 export function helpDialog() {
   const keys = [
-    ['g then q', 'Queue'], ['g then t', 'Triage'], ['g then b', 'Backfill'], ['g then p', 'Pool'], ['g then e', 'Evaluate'],
+    ['g then q', 'Queue'], ['g then t', 'Triage'], ['g then b', 'Backfill'], ['g then p', 'Pool'], ['g then u', 'Subjects'], ['g then e', 'Evaluate'],
     ['g then s', 'Settings'],
     ['/', 'Focus search'], ['n', 'New text'], ['l', 'Quick-log'],
     ['j / k', 'Move down / up the list'], ['Enter', 'Open the focused row'],

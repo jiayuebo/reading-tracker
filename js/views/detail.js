@@ -118,6 +118,8 @@ export function renderDetail(root, ctx, id) {
 
     t.status === 'read' || t.status === 'abandoned' ? assessmentCard(t, setAssessment) : null,
 
+    (doc.subjects || []).length ? subjectsCard(t, doc, set) : null,
+
     section('State', [
       field('Status', selectEl(STATUSES.map(x => [x, STATUS_LABEL[x]]), t.status, v => set({ status: v }))),
       field('Source', selectEl(SOURCES.map(x => [x, x]), t.source || 'queue', v => set({ source: v })),
@@ -221,6 +223,27 @@ function actionBar(t, set, ctx) {
  * whether the hours paid, not whether the text was enjoyed. Absence is a third
  * state and means "not evaluated" — never "average".
  */
+/** The coarse link: this text belongs to this subject (§3). */
+function subjectsCard(t, doc, set) {
+  const on = new Set(t.subject_ids || []);
+  return h('section.card',
+    h('h2', 'Subjects'),
+    h('div.checks', (doc.subjects || []).map(sub =>
+      h('label.check',
+        h('input', {
+          type: 'checkbox', checked: on.has(sub.id),
+          onchange: e => {
+            const next = e.target.checked
+              ? [...new Set([...(t.subject_ids || []), sub.id])]
+              : (t.subject_ids || []).filter(x => x !== sub.id);
+            set({ subject_ids: next });
+          },
+        }),
+        h('span', sub.name)))),
+    h('p.hint', 'Says this text belongs to the subject. To say it covers a particular topic, '
+      + 'attach it from the subject instead — both are kept.'));
+}
+
 function assessmentCard(t, setAssessment) {
   const btn = (value, label) => h(`button${t.assessment === value ? '.primary' : ''}`, {
     onclick: () => setAssessment(t.assessment === value ? null : value),

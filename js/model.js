@@ -161,6 +161,59 @@ export function sortKeyTitle(t) {
   return String(t.title || '').toLowerCase().replace(/^(the|a|an)\s+/, '');
 }
 
+// ── subjects (spec §3, §5.6) ────────────────────────────────────────
+
+/**
+ * §3: 0 unfamiliar / 1 exposed / 2 can explain / 3 can use.
+ *
+ * The wording matters as much as the number. "Can explain" and "can use" are
+ * different competences and the gap between them is where most reading stalls —
+ * you can follow a completeness proof long before you can construct one.
+ */
+export const MASTERY = [
+  [0, 'unfamiliar'],
+  [1, 'exposed'],
+  [2, 'can explain'],
+  [3, 'can use'],
+];
+
+export function masteryLabel(n) {
+  const m = MASTERY.find(([v]) => v === Number(n));
+  return m ? m[1] : 'unfamiliar';
+}
+
+/**
+ * §3: progress is the count of topics at or above target, deliberately NOT a
+ * percentage. A bar invites gaming — splitting one hard topic into three easy
+ * ones would move it — where a count just says what is true.
+ */
+export function subjectProgress(sub) {
+  const topics = sub.topics || [];
+  const target = sub.target_mastery ?? 2;
+  const at = topics.filter(t => Number(t.mastery || 0) >= target).length;
+  return { at, total: topics.length, target };
+}
+
+/**
+ * Texts belonging to a subject, from both directions §3 records them in:
+ * `text.subject_ids` says a text belongs to the subject, `topic.text_ids` says
+ * it covers a particular topic. Neither implies the other, so the union is what
+ * the reader means by "the reading for this subject".
+ */
+export function textsForSubject(sub, texts) {
+  const ids = new Set();
+  for (const t of texts) if ((t.subject_ids || []).includes(sub.id)) ids.add(t.id);
+  for (const topic of sub.topics || []) for (const id of topic.text_ids || []) ids.add(id);
+  return texts.filter(t => ids.has(t.id));
+}
+
+export function nextSubItemId(existing, prefix) {
+  const taken = new Set((existing || []).map(x => x.id));
+  let n = 1;
+  while (taken.has(`${prefix}${n}`)) n++;
+  return `${prefix}${n}`;
+}
+
 // ── comparison pool (spec §4) ───────────────────────────────────────
 
 /**

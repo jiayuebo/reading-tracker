@@ -134,6 +134,7 @@ function matches(t, f, byId) {
   if (f.rereadOnly && !t.reread_wanted) return false;
   if (f.type && t.type !== f.type) return false;
   if (f.project && !(t.project_ids || []).includes(f.project)) return false;
+  if (f.subject && !(t.subject_ids || []).includes(f.subject)) return false;
   if (f.familiarity !== '' && f.familiarity != null && String(t.familiarity ?? '') !== String(f.familiarity)) return false;
   if (f.q) {
     const hay = [
@@ -639,6 +640,10 @@ function controls(prefs, statuses, doc, ctx) {
       ? select('Project', f.project, [['', 'Any project'], ...projects.map(p => [p.id, p.title])],
         v => setF({ project: v }))
       : null,
+    (doc.subjects || []).length
+      ? select('Subject', f.subject, [['', 'Any subject'], ...doc.subjects.map(x => [x.id, x.name])],
+        v => setF({ subject: v }))
+      : null,
     h('label.check',
       h('input', {
         type: 'checkbox', checked: prefs.group !== false,
@@ -655,9 +660,9 @@ function controls(prefs, statuses, doc, ctx) {
         h('span', 'Reread wanted'),
         h('span.dim.tabular', ` ${n}`));
     })(),
-    (f.q || f.type || f.project || f.familiarity !== '' || f.rereadOnly)
+    (f.q || f.type || f.project || f.subject || f.familiarity !== '' || f.rereadOnly)
       ? h('button.link', {
-        onclick: () => setF({ q: '', type: '', project: '', familiarity: '', rereadOnly: false }),
+        onclick: () => setF({ q: '', type: '', project: '', subject: '', familiarity: '', rereadOnly: false }),
       }, 'Clear filters')
       : null,
     h('span.spacer'),
@@ -714,12 +719,12 @@ function emptyState(f, statuses, total, ctx) {
         onclick: () => savePrefs({ filters: { ...f, statuses: DEFAULT_STATUSES } }),
       }, 'Show queued and reading'));
   }
-  const filtering = f.q || f.type || f.project || f.familiarity !== '' || f.rereadOnly;
+  const filtering = f.q || f.type || f.project || f.subject || f.familiarity !== '' || f.rereadOnly;
   if (filtering && total) {
     return h('div.empty',
       h('p', `Nothing matches. ${total} ${statuses.join(' / ')} texts are hidden by the current filters.`),
       h('button', {
-        onclick: () => savePrefs({ filters: { ...f, q: '', type: '', project: '', familiarity: '', rereadOnly: false } }),
+        onclick: () => savePrefs({ filters: { ...f, q: '', type: '', project: '', subject: '', familiarity: '', rereadOnly: false } }),
       }, 'Clear filters'));
   }
   return h('div.empty',
