@@ -50,17 +50,60 @@ export function quickLog(ctx) {
   const title = h('input', { type: 'text', required: true, placeholder: 'Title', 'aria-label': 'Title' });
   const author = h('input', { type: 'text', placeholder: 'Author (optional)', 'aria-label': 'Author' });
 
+  // Whatever the lookup knows beyond the two visible fields. Kept off-screen
+  // rather than adding fields: §5.3's argument is that this screen has to stay
+  // a two-field operation or the capture will not happen at all.
+  let extra = {};
+  const captured = h('p.hint.dim');
+  // The field is singular, and philosophers write themselves surname-first, so
+  // typed text is never split on commas — "Lewis, David" is one person. Only a
+  // picked record has a real author list, and only while the box still holds it
+  // verbatim.
+  let picked = null;
+
+  const panel = lookupPanel((c) => {
+    title.value = c.title || title.value;
+    if (c.authors && c.authors.length) {
+      author.value = c.authors.join(', ');
+      picked = { text: author.value, authors: c.authors };
+    }
+    extra = {};
+    for (const k of ['year', 'pages', 'doi', 'isbn', 'journal', 'container']) {
+      if (c[k] != null) extra[k] = c[k];
+    }
+    if (c.type) extra.type = c.type;
+    // Say what came along invisibly, or the row silently gains fields the
+    // reader never saw and cannot check.
+    const bits = [
+      c.year, c.pages ? `${c.pages} pp` : null, c.type,
+      c.journal || c.container, c.doi ? 'DOI' : (c.isbn ? 'ISBN' : null),
+    ].filter(Boolean);
+    captured.textContent = bits.length ? `Also captured: ${bits.join(' · ')}.` : '';
+    title.focus();
+  }, {
+    authorHint: () => (author.value.split(',')[0] || '').trim(),
+    placeholder: 'Optional — DOI, ISBN, JSTOR link, or title…',
+  });
+
   const submit = () => {
     const v = title.value.trim();
     if (!v) { title.focus(); return; }
+    const { type, container, ...rest } = extra;
+    const typed = author.value.trim();
+    const authors = picked && picked.text === author.value
+      ? picked.authors
+      : (typed ? [typed] : []);
     const row = addText({
       title: v,
-      authors: author.value.trim() ? [author.value.trim()] : [],
+      authors,
+      type: type || 'article',
+      container: container || null,
       status: 'read',
       source: 'off-list',
       date_added: todayISO(),
       date_finished: todayISO(),
       source_notes: 'quick-log',
+      extra: rest,
     });
     dlg.destroy();
     ctx.go(`#/text/${encodeURIComponent(row.id)}`);
@@ -68,14 +111,22 @@ export function quickLog(ctx) {
 
   const form = h('form', { onsubmit: e => { e.preventDefault(); submit(); } },
     h('h2', 'Log something you read'),
-    h('p.hint', 'Two fields. Everything else can be filled in later — or never.'),
+    h('p.hint', 'Two fields and done. Everything else can be filled in later — or never.'),
     h('div.fields', h('div.field.wide', title), h('div.field.wide', author)),
+    captured,
+    h('details.quicklog-lookup',
+      h('summary.small', 'Look it up instead'),
+      h('p.hint', 'Fills the two fields and quietly carries the year, length and identifiers '
+        + 'with them. Skip it — a logged row with a bare title beats one you did not log.'),
+      panel),
     h('p.hint', 'Saved as ', h('code', 'read'), ' / ', h('code', 'off-list'),
       ' — reading the model never ranked, which makes it the most useful calibration data you have.'),
     h('div.actions',
       h('button.primary', { type: 'submit' }, 'Log it'),
       h('button', { type: 'button', onclick: () => dlg.destroy() }, 'Cancel')),
   );
+  // Focus lands on `title` on its own: it is the first control in document
+  // order, and the collapsed <details> keeps the lookup box out of the way.
   const dlg = openDialog(form);
   return dlg;
 }

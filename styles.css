@@ -514,6 +514,15 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
 .diff-from { color: var(--ink-3); text-decoration: line-through; }
 .diff-to { color: var(--ok); font-weight: 600; }
 .hint.bad { color: var(--bad); }
+/* An empty hint still claims its margin; quick-log's "also captured" line is
+   empty until a lookup fills it. */
+.hint:empty { display: none; }
+
+/* Quick-log's lookup is collapsed by default: the two-field path is the point
+   of that screen, and an open search box in front of it invites a detour. */
+.quicklog-lookup { margin-top: .75rem; border-top: 1px solid var(--rule); padding-top: .6rem; }
+.quicklog-lookup summary { cursor: pointer; color: var(--ink-3); }
+.quicklog-lookup[open] summary { margin-bottom: .35rem; }
 
 /* ── comparison pool ─────────────────────────────────────────────── */
 
