@@ -36,18 +36,30 @@ const cache = new Map();      // id -> { state:'loading'|'done'|'error', candida
 const queries = new Map();    // id -> the query string, once the user has edited it
 let undoStack = [];
 
-/** Anything still missing a field worth having. */
-function needsMetadata(t, children) {
-  const suspectType = t.type === 'book' && !(children.get(t.id) || []).length;
-  return t.year == null || t.pages == null || suspectType;
+/**
+ * Anything still missing a field a lookup could fill.
+ *
+ * "Childless book" used to count as missing on the theory that an import row
+ * typed `book` might really be a chapter. It is not a missing field, though:
+ * a monograph read cover to cover has no children and never will, so the rule
+ * parked finished, fully-filled books here permanently with nothing to do to
+ * them. Whether a row is really a book is a judgement, and it belongs to triage
+ * and the detail view. Backfill chases blanks.
+ */
+function needsMetadata(t) {
+  return t.year == null || t.pages == null;
+}
+
+/** Worth a second glance while the row is up, but not a reason to queue it. */
+function unsplitBook(t, children) {
+  return t.type === 'book' && !(children.get(t.id) || []).length;
 }
 
 function worklist() {
   const texts = (state.doc && state.doc.texts) || [];
-  const children = childIndex(texts);
   return texts.filter(t =>
     SCOPES[scope].test(t)
-    && needsMetadata(t, children)
+    && needsMetadata(t)
     && (showChecked || !(t.import || {}).metadata_checked));
 }
 
@@ -147,7 +159,7 @@ export function renderBackfill(root, ctx) {
   const texts = (state.doc && state.doc.texts) || [];
   const children = childIndex(texts);
   const list = worklist();
-  const totalMissing = texts.filter(t => SCOPES[scope].test(t) && needsMetadata(t, children)).length;
+  const totalMissing = texts.filter(t => SCOPES[scope].test(t) && needsMetadata(t)).length;
 
   if (!list.length) {
     mount(root,
@@ -155,7 +167,7 @@ export function renderBackfill(root, ctx) {
       h('div.empty',
         h('p', totalMissing
           ? 'Everything in this scope has been looked at. Nothing left that a lookup can fill.'
-          : 'Nothing in this scope is missing a year, a page count, or a trustworthy type.'),
+          : 'Nothing in this scope is missing a year or a page count.'),
         h('div.empty-actions',
           h('a.button', { href: '#/queue' }, 'Back to the queue'),
           totalMissing ? h('button', {
@@ -172,7 +184,7 @@ export function renderBackfill(root, ctx) {
 
   mount(root,
     head(ctx, cursor, list.length),
-    card(t, ctx),
+    card(t, ctx, children),
     upcoming(list, cursor),
   );
 }
@@ -201,7 +213,7 @@ function head(ctx, i, n) {
     ));
 }
 
-function card(t, ctx) {
+function card(t, ctx, children) {
   const entry = cache.get(t.id) || { state: 'loading' };
   const q = queries.has(t.id) ? queries.get(t.id) : defaultQuery(t);
 
@@ -222,8 +234,9 @@ function card(t, ctx) {
     ),
     h('p.backfill-missing',
       h('span.dim', 'missing: '),
-      [t.year == null ? 'year' : null, t.pages == null ? 'pages' : null,
-        t.type === 'book' ? 'type is “book”, unverified' : null].filter(Boolean).join(', ') || 'nothing',
+      [t.year == null ? 'year' : null, t.pages == null ? 'pages' : null]
+        .filter(Boolean).join(', ') || 'nothing',
+      unsplitBook(t, children) ? h('span.dim', ' · no chapters recorded') : null,
     ),
 
     h('div.lookup-bar', queryInput,
