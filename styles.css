@@ -341,6 +341,9 @@ a.group-head:hover .group-title { color: var(--ink); text-decoration: underline;
 .chapter-row .chapter-title { padding-left: 1.6em; }
 .chapter-row.have .chapter-title { color: var(--ink-3); }
 .chapter-row input { margin: 0; position: relative; top: .15rem; }
+.renumber { display: flex; align-items: baseline; gap: .5rem; font-size: .88rem;
+  padding: .5rem .4rem 0; border-top: 1px solid var(--rule); margin-top: .4rem; }
+.renumber[hidden] { display: none; }
 
 .provenance summary { cursor: pointer; font-size: .74rem; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); }
 .provenance dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem .9rem; margin: .7rem 0 0; font-size: .84rem; }

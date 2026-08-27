@@ -156,19 +156,33 @@ export function chaptersDialog(book, ctx) {
 
   let found = [];
   let boxes = [];
+  // Rows already under this book whose number the fetched list would change.
+  // Without this the fix would only reach chapters imported from now on, and
+  // an existing contents list would stay stuck in alphabetical order.
+  let renumber = [];
+  const renumberBox = h('input', { type: 'checkbox', checked: true, onchange: () => refreshCount() });
+  const renumberWrap = h('label.renumber', { hidden: true });
 
   const refreshCount = () => {
     const n = boxes.filter(b => b.checked).length;
-    addBtn.disabled = !n;
-    addBtn.textContent = n ? `Add ${n} row${n === 1 ? '' : 's'}` : 'Add selected';
+    const fixing = renumber.length && renumberBox.checked;
+    addBtn.disabled = !n && !fixing;
+    addBtn.textContent = n
+      ? `Add ${n} row${n === 1 ? '' : 's'}${fixing ? ' and renumber' : ''}`
+      : (fixing ? `Renumber ${renumber.length} row${renumber.length === 1 ? '' : 's'}` : 'Add selected');
   };
 
   const add = () => {
     const picked = boxes.filter(b => b.checked).map(b => found[Number(b.dataset.i)]);
-    if (!picked.length) return;
+    const fixing = renumber.length && renumberBox.checked ? renumber : [];
+    if (!picked.length && !fixing.length) return;
     const taken = new Set((state.doc.texts || []).map(t => t.id));
     const made = [];
     mutate(d => {
+      for (const { id, no } of fixing) {
+        const row = d.texts.find(x => x.id === id);
+        if (row) row.chapter_no = no;
+      }
       for (const c of picked) {
         const id = uniqueId(slugify(c.title), taken);
         taken.add(id);
@@ -197,7 +211,10 @@ export function chaptersDialog(book, ctx) {
       }
     });
     dlg.destroy();
-    ctx.toast(`Added ${made.length} row${made.length === 1 ? '' : 's'} under ${book.title}.`);
+    const bits = [];
+    if (made.length) bits.push(`Added ${made.length} row${made.length === 1 ? '' : 's'}`);
+    if (fixing.length) bits.push(`${bits.length ? 'n' : 'N'}umbered ${fixing.length} existing row${fixing.length === 1 ? '' : 's'}`);
+    ctx.toast(`${bits.join(' and ')} under ${book.title}.`);
     ctx.rerender();
   };
 
@@ -244,6 +261,16 @@ export function chaptersDialog(book, ctx) {
     countLine.textContent = dupes.length
       ? `${dupes.length} of these are already under this book and are unticked.`
       : '';
+
+    renumber = candidates
+      .map(c => ({ have: alreadyHave(kids, c), no: c.chapter_no }))
+      .filter(x => x.have && x.no != null && x.have.chapter_no !== x.no)
+      .map(x => ({ id: x.have.id, no: x.no }));
+    if (renumber.length) {
+      renumberWrap.hidden = false;
+      mount(renumberWrap, renumberBox, h('span',
+        `Also number the ${renumber.length} already recorded, so they sort in the book's order`));
+    }
     refreshCount();
   };
 
@@ -254,6 +281,7 @@ export function chaptersDialog(book, ctx) {
     status,
     list,
     countLine,
+    renumberWrap,
     h('div.actions',
       addBtn,
       h('button', { type: 'button', onclick: () => dlg.destroy() }, 'Cancel')),

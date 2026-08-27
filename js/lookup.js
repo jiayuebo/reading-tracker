@@ -495,7 +495,15 @@ export async function findChapters(book) {
         c.container = c.container || c.journal;
         c.journal = null;
       }
-      seen.set(doi, { ...c, title, chapter_no: no, start: firstPage(w.page) });
+      // When the DOI sits under the book's own stem, its numeric suffix is the
+      // publisher's deposit order — better evidence of position than a page
+      // range, which front matter often lacks entirely.
+      const seq = partOfBook ? Number((String(doi).match(/\.(\d{1,4})$/) || [])[1]) : NaN;
+      seen.set(doi, {
+        ...c, title, chapter_no: no,
+        start: firstPage(w.page),
+        seq: Number.isFinite(seq) ? seq : null,
+      });
     }
     if (items && items.length && !via) via = label;
   };
@@ -540,12 +548,20 @@ export async function findChapters(book) {
   // those pairwise against numbered chapters yields a non-transitive
   // comparator — which does not merely misplace them, it scrambles the whole
   // array. Unplaceable items sort to the end, where they are obvious.
-  const key = (c) => [
-    c.start != null ? 0 : (c.chapter_no != null ? 1 : 2),
-    c.start != null ? c.start : (c.chapter_no != null ? c.chapter_no : 0),
-    fold(c.title),
-  ];
-  const candidates = [...seen.values()].sort((a, b) => {
+  const all = [...seen.values()];
+  // Neither key works alone. Page order is the book's real order, but front
+  // matter is paginated in roman numerals that parse to nothing — "Contents",
+  // v-vi — so it would sort after page 774. Deposit order fixes that, yet is
+  // not the book's order either: Cambridge deposited four of the Critique's
+  // sections late, so `.033` is a passage belonging on page 202.
+  //
+  // So: front matter first, in deposit order, then the body in page order.
+  const key = (c) => {
+    if (c.start != null) return [1, c.start, fold(c.title)];
+    if (c.seq != null) return [0, c.seq, fold(c.title)];
+    return [2, c.chapter_no != null ? c.chapter_no : 0, fold(c.title)];
+  };
+  const candidates = all.sort((a, b) => {
     const ka = key(a); const kb = key(b);
     if (ka[0] !== kb[0]) return ka[0] - kb[0];
     if (ka[1] !== kb[1]) return ka[1] - kb[1];
@@ -553,6 +569,15 @@ export async function findChapters(book) {
   });
   // An ISBN names one book. A title merely resembles one, so a title-matched
   // result is offered rather than assumed: the caller pre-selects nothing.
+  // Where the publisher numbers its own chapters, that numbering is the real
+  // one and is left alone. Where it does not — Cambridge gives the Critique's
+  // thirty-six parts no numbers at all — impose a sequence, so the contents
+  // list reads in the book's order instead of alphabetically. All or nothing
+  // per book: a mix of publisher numbers and invented ones would mean two
+  // different things in one column.
+  if (!candidates.some(c => c.chapter_no != null)) {
+    candidates.forEach((c, i) => { c.chapter_no = i + 1; });
+  }
   return { via: via || null, candidates, certain: !byTitle };
 }
 
