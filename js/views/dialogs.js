@@ -3,7 +3,7 @@
 
 import { h, mount } from '../dom.js';
 import { state, mutate, serialize, resolveConflictTakeRemote, resolveConflictForceLocal, save } from '../store.js';
-import { newText, slugify, uniqueId, todayISO, TYPES, childIndex } from '../model.js';
+import { newText, slugify, uniqueId, todayISO, TYPES, childIndex, fold } from '../model.js';
 import { lookupPanel, lookupEnabled } from './lookup-ui.js';
 import { findChapters, alreadyHave } from '../lookup.js';
 
@@ -148,7 +148,26 @@ export function quickLog(ctx) {
  * pre-unticked rather than hidden, so a partial import stays legible.
  */
 export function chaptersDialog(book, ctx) {
-  const kids = childIndex(state.doc.texts || []).get(book.id) || [];
+  /**
+   * Everything already sitting under this book — read fresh on every use, not
+   * captured when the dialog opens.
+   *
+   * Two ways a chapter attaches to its book and the duplicate check only knew
+   * one of them. `parent_id` is the real link; a row logged through quick-log
+   * carries the book's name in `container` instead, with no parent_id at all,
+   * so the Critique's five quick-logged sections were invisible here and came
+   * back as second copies of themselves.
+   */
+  const kidsNow = () => {
+    const texts = state.doc.texts || [];
+    const linked = childIndex(texts).get(book.id) || [];
+    const want = fold(book.title || '');
+    const named = want
+      ? texts.filter(t => !t.parent_id && t.container && fold(t.container) === want)
+      : [];
+    return linked.concat(named);
+  };
+  let kids = kidsNow();
   const status = h('p.hint', 'Asking Crossref…');
   const list = h('div.chapter-list');
   const countLine = h('p.hint.dim');
@@ -160,6 +179,7 @@ export function chaptersDialog(book, ctx) {
   // Without this the fix would only reach chapters imported from now on, and
   // an existing contents list would stay stuck in alphabetical order.
   let renumber = [];
+  let adding = false;
   const renumberBox = h('input', { type: 'checkbox', checked: true, onchange: () => refreshCount() });
   const renumberWrap = h('label.renumber', { hidden: true });
 
@@ -173,9 +193,17 @@ export function chaptersDialog(book, ctx) {
   };
 
   const add = () => {
-    const picked = boxes.filter(b => b.checked).map(b => found[Number(b.dataset.i)]);
+    if (adding) return;
+    adding = true;
+    // The list is re-derived here rather than trusted from render time: this is
+    // the last point before rows are written, and it is the only check that
+    // cannot be raced.
+    kids = kidsNow();
+    const picked = boxes.filter(b => b.checked)
+      .map(b => found[Number(b.dataset.i)])
+      .filter(c => !alreadyHave(kids, c));
     const fixing = renumber.length && renumberBox.checked ? renumber : [];
-    if (!picked.length && !fixing.length) return;
+    if (!picked.length && !fixing.length) { dlg.destroy(); return; }
     const taken = new Set((state.doc.texts || []).map(t => t.id));
     const made = [];
     mutate(d => {
@@ -220,6 +248,7 @@ export function chaptersDialog(book, ctx) {
 
   const render = (via, candidates, certain) => {
     found = candidates;
+    kids = kidsNow();
     if (!candidates.length) {
       status.className = 'hint';
       status.textContent = book.isbn || book.title
