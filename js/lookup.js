@@ -456,22 +456,65 @@ function containerMatches(book, w) {
 /**
  * @returns {Promise<{via: string, candidates: object[]}>}
  */
+/**
+ * Crossref's `isbn:` filter is not a reliable index of a book's parts. The
+ * Cambridge Critique of Pure Reason returns three chapters by ISBN — and all
+ * thirty-two when its own DOI stem is probed directly, because that is what the
+ * parts were actually deposited against. A publisher numbering its chapters
+ * `<book-doi>.001`, `.002`, … lets the whole contents list be recovered in one
+ * request, since Crossref ORs repeated `doi:` filters.
+ *
+ * Nothing is guessed: every DOI here either resolves to a real record or is
+ * silently absent from the reply.
+ */
+async function probeDoiStem(stem, from, count) {
+  const filter = Array.from({ length: count }, (_, i) =>
+    `doi:${stem}.${String(from + i).padStart(3, '0')}`).join(',');
+  const d = await getJSON(`${CROSSREF}?filter=${encodeURIComponent(filter)}`
+    + `&rows=${count}&select=${CHAPTER_SELECT}`);
+  return ((d.message || {}).items) || [];
+}
+
 export async function findChapters(book) {
   const seen = new Map();
   let via = null;
   let byTitle = false;
 
-  const collect = (items, label) => {
+  const collect = (items, label, { partOfBook = false } = {}) => {
     for (const w of items || []) {
       const doi = w.DOI;
       if (!doi || seen.has(doi)) continue;
       const c = fromCrossref(w);
       const { no, title } = splitNumbering(c.title);
       if (!title) continue;
+      // Front and back matter is deposited as Crossref type `other`, which maps
+      // to `article` by default — wrong for a glossary, and it would send the
+      // book's name to `journal` instead of `container`.
+      if (partOfBook && c.type !== 'chapter' && c.type !== 'section') {
+        c.type = 'section';
+        c.container = c.container || c.journal;
+        c.journal = null;
+      }
       seen.set(doi, { ...c, title, chapter_no: no, start: firstPage(w.page) });
     }
     if (items && items.length && !via) via = label;
   };
+
+  // A book DOI that already ends in a numbered segment is itself a part
+  // (OUP deposits books as `…9780199581405.001.0001`), so there is no stem
+  // below it to probe and the ISBN path is the one that works.
+  const rawDoi = String(book.doi || '').trim().toLowerCase().replace(/\/+$/, '');
+  const stem = /\.\d{3,4}$/.test(rawDoi) ? '' : rawDoi;
+  if (stem) {
+    // Front matter and appendices are deposited as `other`, so no type filter
+    // here — a DOI under the book's own stem is part of the book by definition.
+    const BATCH = 40;
+    for (let from = 1; from <= 200; from += BATCH) {
+      const items = await probeDoiStem(stem, from, BATCH);
+      collect(items, `the DOI ${book.doi}`, { partOfBook: true });
+      if (items.length < BATCH) break;   // ran off the end of the numbering
+    }
+  }
 
   const isbn = String(book.isbn || '').replace(/[^0-9Xx]/g, '');
   if (isbn) {
