@@ -157,6 +157,21 @@ export function authorLine(t) {
   return `${a[0]} et al.`;
 }
 
+/**
+ * Where a row sits inside its parent, or null if it has no place.
+ *
+ * `chapter_no` is set by the chapter importer. The fallback reads a leading
+ * number off the title, because numbering the title by hand — "3 Anti-
+ * Individualism" — was the only way to force reading order before this
+ * existed, and those rows should keep working without being edited.
+ */
+export function orderOf(t) {
+  if (!t) return null;
+  if (Number.isInteger(t.chapter_no)) return t.chapter_no;
+  const m = String(t.title || '').match(/^\s*(?:chapter|chap\.?|part|section)?\s*(\d{1,3})\s*[.:—–)-]?\s+\S/i);
+  return m ? Number(m[1]) : null;
+}
+
 export function sortKeyTitle(t) {
   return String(t.title || '').toLowerCase().replace(/^(the|a|an)\s+/, '');
 }

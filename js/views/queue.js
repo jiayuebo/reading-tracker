@@ -18,7 +18,7 @@ import { h, mount } from '../dom.js';
 import { state, savePrefs, mutate } from '../store.js';
 import {
   childIndex, byIdIndex, containerName, unreadPrerequisites, groupKey, MAX_DEPTH, descendantIds,
-  authorLine, priority, isScored, scores, sortKeyTitle, fold, matchesQuery, todayISO,
+  authorLine, priority, isScored, scores, sortKeyTitle, fold, matchesQuery, todayISO, orderOf,
 } from '../model.js';
 
 // Checkboxes, unioned — not a dropdown of preset combinations. A dropdown made
@@ -278,9 +278,32 @@ function buildForest(ordered, byId, children) {
     n.rank = Math.min(own, ...n.children.map(c => rank(c, depth + 1)), Infinity);
     return n.rank;
   };
+  /**
+   * The chosen sort decides where a group sits on the page; inside a group,
+   * a book that has a reading order is shown in it. Nobody reads chapter 7
+   * before chapter 3 because it scored higher, and the two orderings were
+   * never really in competition — they answer different questions.
+   *
+   * Top level is left alone: that is what the sort dropdown is for. This only
+   * runs when nesting is on, because the forest is only built then.
+   */
+  const orderKey = (n) => {
+    const o = n.row ? orderOf(n.row) : null;
+    return o == null ? [1, 0, n.rank] : [0, o, n.rank];
+  };
   const sortTree = (list, depth = 0) => {
     if (depth > MAX_DEPTH) return list;
-    list.sort((a, b) => a.rank - b.rank);
+    if (depth > 0 && list.some(n => n.row && orderOf(n.row) != null)) {
+      // A composite key rather than a chain of tests: mixing numbered chapters
+      // with unnumbered front matter pairwise is exactly the non-transitive
+      // comparator that scrambled the importer's own list.
+      list.sort((a, b) => {
+        const ka = orderKey(a); const kb = orderKey(b);
+        return (ka[0] - kb[0]) || (ka[1] - kb[1]) || (ka[2] - kb[2]);
+      });
+    } else {
+      list.sort((a, b) => a.rank - b.rank);
+    }
     for (const n of list) sortTree(n.children, depth + 1);
     return list;
   };

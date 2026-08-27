@@ -5,7 +5,7 @@ import { h, mount } from '../dom.js';
 import { state, mutate } from '../store.js';
 import {
   TYPES, STATUSES, SOURCES, STATUS_LABEL, childIndex, byIdIndex, descendantIds,
-  containerName, unreadPrerequisites, quadrant, scores, todayISO, sortKeyTitle, poolEligible,
+  containerName, unreadPrerequisites, quadrant, scores, todayISO, sortKeyTitle, poolEligible, orderOf,
 } from '../model.js';
 import { lookupPanel, lookupEnabled } from './lookup-ui.js';
 import { applyCandidate, describe } from '../lookup.js';
@@ -334,7 +334,7 @@ function scoreRow(label, block, onset, editable, note) {
  * chapter 10 sorts between 1 and 2.
  */
 function childOrder(a, b) {
-  const an = a.chapter_no, bn = b.chapter_no;
+  const an = orderOf(a), bn = orderOf(b);
   if (an != null && bn != null && an !== bn) return an - bn;
   if (an != null && bn == null) return -1;
   if (an == null && bn != null) return 1;
