@@ -398,3 +398,124 @@ export function describe(c) {
   if (c.source) bits.push(c.source);
   return bits.join(' · ');
 }
+
+// ── chapter discovery (spec §5) ─────────────────────────────────────
+//
+// A recent academic book is often deposited with Crossref chapter by chapter,
+// each with its own DOI and page range. Where that is true the whole table of
+// contents can be recovered from the book's ISBN in one request. Where it is
+// not — anything older than roughly 2005, and most trade and translated
+// editions — no amount of querying will conjure it, and the honest answer is
+// that there is nothing to find.
+
+const CHAPTER_FILTER = 'type:book-chapter,type:book-part,type:book-section';
+const CHAPTER_SELECT = 'DOI,title,subtitle,author,page,issued,type,container-title,ISBN,publisher';
+
+/**
+ * Some publishers — OUP conspicuously — put the chapter number in the title
+ * field: "8 Biological and Methodological Backgrounds". Left there it sorts
+ * chapter 10 between 1 and 2 and reads badly in a list. Split it off so the
+ * title is the title and the number can do the ordering.
+ */
+function splitNumbering(title) {
+  const m = String(title || '').match(
+    /^\s*(?:chapter|chap\.?|part|section)?\s*(\d{1,3})\s*[.:—–-]?\s+(\S.*)$/i);
+  if (!m) return { no: null, title: String(title || '').trim() };
+  return { no: Number(m[1]), title: m[2].trim() };
+}
+
+function firstPage(page) {
+  const m = String(page || '').match(/^(\d+)/);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Crossref's `query.container-title` is a relevance search, not a filter, so it
+ * happily returns chapters of other books — and a short title makes that
+ * catastrophic. Searching Strawson's `Individuals` under a substring rule
+ * returned a hundred chapters from a hundred unrelated volumes, every one of
+ * them ready to be added in a single click.
+ *
+ * So: the container has to be this book by name, and either the name is exact
+ * or it is long enough to be discriminating AND the chapter shares an author
+ * with the book. A one-word title gets exact matching or nothing.
+ */
+function containerMatches(book, w) {
+  const got = fold(cleanText((w['container-title'] || [])[0] || ''));
+  const want = fold(book.title || '');
+  if (!got || !want) return false;
+  if (got === want) return true;
+  const distinctive = want.split(/\s+/).filter(Boolean).length >= 3 && want.length >= 18;
+  if (!distinctive) return false;
+  // "Origins of Objectivity" vs "Origins of Objectivity: ..." — a subtitle is
+  // fine; an unrelated book that merely contains the phrase is not.
+  if (!got.startsWith(want)) return false;
+  return authorsAgree(book, fromCrossref(w));
+}
+
+/**
+ * @returns {Promise<{via: string, candidates: object[]}>}
+ */
+export async function findChapters(book) {
+  const seen = new Map();
+  let via = null;
+  let byTitle = false;
+
+  const collect = (items, label) => {
+    for (const w of items || []) {
+      const doi = w.DOI;
+      if (!doi || seen.has(doi)) continue;
+      const c = fromCrossref(w);
+      const { no, title } = splitNumbering(c.title);
+      if (!title) continue;
+      seen.set(doi, { ...c, title, chapter_no: no, start: firstPage(w.page) });
+    }
+    if (items && items.length && !via) via = label;
+  };
+
+  const isbn = String(book.isbn || '').replace(/[^0-9Xx]/g, '');
+  if (isbn) {
+    const url = `${CROSSREF}?filter=isbn:${encodeURIComponent(isbn)},${CHAPTER_FILTER}`
+      + `&rows=200&select=${CHAPTER_SELECT}`;
+    const d = await getJSON(url);
+    collect(((d.message || {}).items) || [], `ISBN ${isbn}`);
+  }
+
+  // Fall back to the title only when the ISBN found nothing — a book can be
+  // deposited under a different ISBN than the printing you own.
+  if (!seen.size && book.title) {
+    const url = `${CROSSREF}?query.container-title=${encodeURIComponent(book.title)}`
+      + `&filter=${CHAPTER_FILTER}&rows=100&select=${CHAPTER_SELECT}`;
+    const d = await getJSON(url);
+    const items = (((d.message || {}).items) || []).filter(w => containerMatches(book, w));
+    collect(items, `the title “${book.title}”`);
+    if (seen.size) byTitle = true;
+  }
+
+  // A composite key, not a chain of pairwise tests. Front matter ("Preface",
+  // "Dedication") carries neither a page range nor a number, and comparing
+  // those pairwise against numbered chapters yields a non-transitive
+  // comparator — which does not merely misplace them, it scrambles the whole
+  // array. Unplaceable items sort to the end, where they are obvious.
+  const key = (c) => [
+    c.start != null ? 0 : (c.chapter_no != null ? 1 : 2),
+    c.start != null ? c.start : (c.chapter_no != null ? c.chapter_no : 0),
+    fold(c.title),
+  ];
+  const candidates = [...seen.values()].sort((a, b) => {
+    const ka = key(a); const kb = key(b);
+    if (ka[0] !== kb[0]) return ka[0] - kb[0];
+    if (ka[1] !== kb[1]) return ka[1] - kb[1];
+    return ka[2].localeCompare(kb[2]);
+  });
+  // An ISBN names one book. A title merely resembles one, so a title-matched
+  // result is offered rather than assumed: the caller pre-selects nothing.
+  return { via: via || null, candidates, certain: !byTitle };
+}
+
+/** Is this chapter already recorded under the book? Matched on DOI, then title. */
+export function alreadyHave(kids, c) {
+  return (kids || []).find(k =>
+    (c.doi && k.doi && String(k.doi).toLowerCase() === String(c.doi).toLowerCase())
+    || (k.title && fold(k.title) === fold(c.title))) || null;
+}

@@ -320,6 +320,28 @@ a.group-head:hover .group-title { color: var(--ink); text-decoration: underline;
 .child-list { margin: 0; padding-left: 1.1rem; font-size: .9rem; }
 .child-list li { margin: .15rem 0; }
 
+/* A card whose heading shares its line with an action. */
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.card-head h2 { margin: 0; }
+
+/* Chapter numbers line up in their own narrow column so the titles start flush,
+   which is the whole point of importing a table of contents in order. */
+.chapter-no {
+  display: inline-block; min-width: 1.6em; margin-left: -1.6em;
+  font-variant-numeric: tabular-nums; color: var(--ink-3); font-size: .85em;
+}
+.child-list li { list-style: none; padding-left: 1.6em; margin-left: -1.1rem; }
+
+.chapter-list { max-height: 45vh; overflow-y: auto; margin: .6rem 0; }
+.chapter-row {
+  display: grid; grid-template-columns: auto 1fr auto; gap: .55rem;
+  align-items: baseline; padding: .28rem .4rem; border-radius: 3px;
+}
+.chapter-row:hover { background: var(--surface-2); }
+.chapter-row .chapter-title { padding-left: 1.6em; }
+.chapter-row.have .chapter-title { color: var(--ink-3); }
+.chapter-row input { margin: 0; position: relative; top: .15rem; }
+
 .provenance summary { cursor: pointer; font-size: .74rem; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); }
 .provenance dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem .9rem; margin: .7rem 0 0; font-size: .84rem; }
 .provenance dt { color: var(--ink-3); font-family: var(--mono); font-size: .78rem; }
@@ -514,6 +536,7 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
 .diff-from { color: var(--ink-3); text-decoration: line-through; }
 .diff-to { color: var(--ok); font-weight: 600; }
 .hint.bad { color: var(--bad); }
+.hint.warn { color: var(--warn); }
 /* An empty hint still claims its margin; quick-log's "also captured" line is
    empty until a lookup fills it. */
 .hint:empty { display: none; }

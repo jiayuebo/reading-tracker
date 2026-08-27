@@ -10,6 +10,7 @@ import {
 import { lookupPanel, lookupEnabled } from './lookup-ui.js';
 import { applyCandidate, describe } from '../lookup.js';
 import { rowPicker } from './row-picker.js';
+import { chaptersDialog } from './dialogs.js';
 
 export function renderDetail(root, ctx, id) {
   const doc = state.doc;
@@ -168,7 +169,7 @@ export function renderDetail(root, ctx, id) {
       field('Finished', dateInput(t.date_finished, v => set({ date_finished: v }))),
     ]),
 
-    kids.length ? childList(kids) : null,
+    kids.length || t.type === 'book' ? childList(t, kids, ctx) : null,
 
     provenance(t),
 
@@ -327,14 +328,42 @@ function scoreRow(label, block, onset, editable, note) {
   );
 }
 
-function childList(kids) {
+/**
+ * Chapter number first where a chapter number is known, so an imported table of
+ * contents reads in reading order rather than alphabetically — otherwise
+ * chapter 10 sorts between 1 and 2.
+ */
+function childOrder(a, b) {
+  const an = a.chapter_no, bn = b.chapter_no;
+  if (an != null && bn != null && an !== bn) return an - bn;
+  if (an != null && bn == null) return -1;
+  if (an == null && bn != null) return 1;
+  return sortKeyTitle(a).localeCompare(sortKeyTitle(b));
+}
+
+function childList(t, kids, ctx) {
+  const find = t.type === 'book' && lookupEnabled()
+    ? h('button.small', {
+      type: 'button',
+      onclick: () => chaptersDialog(t, ctx),
+    }, kids.length ? 'Find more chapters' : 'Find chapters')
+    : null;
+
   return h('section.card',
-    h('h2', `Contains ${kids.length} row${kids.length === 1 ? '' : 's'}`),
-    h('ul.child-list', kids
-      .slice().sort((a, b) => sortKeyTitle(a).localeCompare(sortKeyTitle(b)))
-      .map(k => h('li',
+    h('div.card-head',
+      h('h2', kids.length
+        ? `Contains ${kids.length} row${kids.length === 1 ? '' : 's'}`
+        : 'Chapters'),
+      find),
+    kids.length
+      ? h('ul.child-list', kids.slice().sort(childOrder).map(k => h('li',
+        k.chapter_no != null ? h('span.chapter-no', `${k.chapter_no}`) : null,
         h('a', { href: `#/text/${encodeURIComponent(k.id)}` }, k.title || '(untitled)'),
-        h('span.dim', ` ${STATUS_LABEL[k.status] || k.status}`)))));
+        h('span.dim', ` ${STATUS_LABEL[k.status] || k.status}`))))
+      : h('p.hint', 'Nothing is nested under this book yet. Crossref can supply the table of '
+        + 'contents for books deposited chapter by chapter — mostly academic titles from about '
+        + '2005 on.'),
+  );
 }
 
 /** The import block is provenance, not working state (spec §3): show, don't edit. */
