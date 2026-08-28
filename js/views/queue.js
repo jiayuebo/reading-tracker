@@ -35,6 +35,17 @@ const STATUS_FILTERS = [
 const DEFAULT_STATUSES = ['queued', 'reading'];
 
 /**
+ * Bulk selection (spec §5.1).
+ *
+ * Module-level so it survives the re-render every edit triggers, and pruned to
+ * what is currently on screen at the top of each render. That pruning is the
+ * safety property: a bulk action can only ever touch rows the filter and the
+ * search are showing you, so there is no way to delete something you cannot
+ * see because it was selected under a filter you have since changed.
+ */
+const selected = new Set();
+
+/**
  * Which statuses are showing. Migrates the single-scope key this replaced, so a
  * saved preference from before the change still means what it used to.
  */
@@ -75,6 +86,16 @@ export function renderQueue(root, ctx) {
   const triageCount = texts.filter(t => t.status === 'triage').length;
   const inScopeTotal = texts.filter(inScope).length;
   const showsFinished = statuses.includes('read') || statuses.includes('abandoned');
+
+  // Prune first: `ordered` is exactly what is on screen.
+  const visibleIds = new Set(ordered.map(t => t.id));
+  for (const id of [...selected]) if (!visibleIds.has(id)) selected.delete(id);
+  const picked = ordered.filter(t => selected.has(t.id));
+
+  const sel = {
+    has: id => selected.has(id),
+    toggle: (id, on) => { if (on) selected.add(id); else selected.delete(id); ctx.rerender(); },
+  };
 
   const drag = { byId, children, enabled: prefs.group !== false };
   const forest = prefs.group === false ? null : buildForest(ordered, byId, children);
@@ -117,12 +138,161 @@ export function renderQueue(root, ctx) {
 
     prefs.group !== false ? unnestZone() : null,
 
+    ordered.length ? selectionBar(ordered, picked, byId, children, ctx) : null,
+
     ordered.length
       ? (forest
-        ? h('ol.rows', { role: 'list' }, forest.map(n => renderNode(n, { cols, prefs, byId, children, drag, ctx }, 0)))
+        ? h('ol.rows', { role: 'list' }, forest.map(n => renderNode(n, { cols, prefs, byId, children, drag, ctx, sel }, 0)))
         : h('ol.rows', { role: 'list' },
-          ordered.map(t => h('li.group', row(t, { cols, prefs, byId, children, drag, ctx }, 0)))))
+          ordered.map(t => h('li.group', row(t, { cols, prefs, byId, children, drag, ctx, sel }, 0)))))
       : emptyState(f, statuses, inScopeTotal, ctx),
+  );
+}
+
+// ── bulk selection ──────────────────────────────────────────────────
+
+/**
+ * Apply one change to every selected row that it actually makes sense for, in
+ * a single mutation so it is one save and one undo step.
+ *
+ * Actions report what they skipped rather than silently applying to everything:
+ * "Start" on a row already read is not a no-op the user meant, it is a row the
+ * action does not fit, and saying so is how you notice you selected too much.
+ */
+function applyToPicked(picked, { fits, change, did, verb }, ctx) {
+  const hits = picked.filter(fits);
+  if (!hits.length) {
+    ctx.toast(`Nothing to ${verb}: none of the ${picked.length} selected `
+      + `row${picked.length === 1 ? ' is' : 's are'} in a state for it.`);
+    return;
+  }
+  const ids = new Set(hits.map(t => t.id));
+  mutate(d => { for (const row of d.texts) if (ids.has(row.id)) change(row); });
+  const skipped = picked.length - hits.length;
+  ctx.toast(`${did} ${hits.length} row${hits.length === 1 ? '' : 's'}`
+    + (skipped ? `; left ${skipped} alone as ${skipped === 1 ? 'it was' : 'they were'} not in a state for it.` : '.'));
+}
+
+/**
+ * Delete the selected rows and every reference to them.
+ *
+ * A row id is pointed at from four places, and leaving any of them behind
+ * leaves the file quietly inconsistent: a child's `parent_id`, another text's
+ * `prerequisite_ids`, and a subject topic's `text_ids`. Children of a deleted
+ * row that are not themselves selected are promoted to top level rather than
+ * left pointing at nothing.
+ */
+function deletePicked(picked, byId, children, ctx) {
+  const ids = new Set(picked.map(t => t.id));
+  const orphans = [];
+  for (const t of picked) {
+    for (const k of children.get(t.id) || []) if (!ids.has(k.id)) orphans.push(k);
+  }
+  const lines = [
+    `Delete ${picked.length} row${picked.length === 1 ? '' : 's'}?`,
+    '',
+    ...picked.slice(0, 12).map(t => `  · ${t.title || '(untitled)'}`),
+    picked.length > 12 ? `  · …and ${picked.length - 12} more` : null,
+    '',
+    orphans.length
+      ? (orphans.length === 1
+        ? '1 row nested under them is not selected. It will be moved to the top level rather '
+          + 'than left pointing at a row that no longer exists.'
+        : `${orphans.length} rows nested under them are not selected. They will be moved to the `
+          + 'top level rather than left pointing at a row that no longer exists.')
+      : null,
+    'This cannot be undone from inside the app. The previous version stays in the repository history.',
+  ].filter(x => x !== null);
+  if (!confirm(lines.join('\n'))) return;
+
+  mutate(d => {
+    d.texts = d.texts.filter(t => !ids.has(t.id));
+    for (const t of d.texts) {
+      if (t.parent_id && ids.has(t.parent_id)) t.parent_id = null;
+      if ((t.prerequisite_ids || []).some(x => ids.has(x))) {
+        t.prerequisite_ids = t.prerequisite_ids.filter(x => !ids.has(x));
+      }
+    }
+    for (const sub of d.subjects || []) {
+      for (const tp of sub.topics || []) {
+        if ((tp.text_ids || []).some(x => ids.has(x))) {
+          tp.text_ids = tp.text_ids.filter(x => !ids.has(x));
+        }
+      }
+    }
+  });
+  selected.clear();
+  ctx.toast(`Deleted ${picked.length} row${picked.length === 1 ? '' : 's'}`
+    + (orphans.length ? `; moved ${orphans.length} to the top level.` : '.')
+    + ' Save when ready.');
+}
+
+function selectionBar(ordered, picked, byId, children, ctx) {
+  const all = picked.length === ordered.length && ordered.length > 0;
+  const master = h('input', {
+    type: 'checkbox', checked: all,
+    'aria-label': `Select all ${ordered.length} shown`,
+    onchange: (e) => {
+      selected.clear();
+      if (e.target.checked) for (const t of ordered) selected.add(t.id);
+      ctx.rerender();
+    },
+  });
+  // Neither on nor off when the selection is a subset — the tri-state is the
+  // only honest rendering of "some".
+  master.indeterminate = picked.length > 0 && !all;
+
+  if (!picked.length) {
+    return h('div.bulk-bar.quiet',
+      h('label.check', master, h('span', `Select all ${ordered.length} shown`)),
+      h('span.hint.dim', 'Or press ', h('kbd', 'x'), ' on a focused row.'));
+  }
+
+  const act = (label, title, spec) =>
+    h('button.small', { type: 'button', title, onclick: () => applyToPicked(picked, spec, ctx) }, label);
+
+  const n = picked.length;
+  return h('div.bulk-bar',
+    h('label.check', master, h('span.strong', `${n} selected`)),
+    h('span.bulk-actions',
+      act('Start', 'Move queued rows to reading and stamp today as the start date', {
+        did: 'Started', verb: 'start', fits: t => t.status === 'queued',
+        change: (r) => { r.status = 'reading'; if (!r.date_started) r.date_started = todayISO(); },
+      }),
+      act('Finish', 'Move reading rows to read and stamp today as the finish date', {
+        did: 'Finished', verb: 'finish', fits: t => t.status === 'reading' || t.status === 'queued',
+        change: (r) => {
+          r.status = 'read';
+          if (!r.date_finished) r.date_finished = todayISO();
+        },
+      }),
+      act('Back to queue', 'Return to queued', {
+        did: 'Requeued', verb: 'requeue', fits: t => t.status !== 'queued',
+        change: (r) => { r.status = 'queued'; },
+      }),
+      act('Good', 'Mark read rows good — the hours paid', {
+        did: 'Marked good', verb: 'mark good', fits: t => t.status === 'read' || t.status === 'abandoned',
+        change: (r) => { r.assessment = 'good'; },
+      }),
+      act('Bad', 'Mark read rows bad', {
+        did: 'Marked bad', verb: 'mark bad', fits: t => t.status === 'read' || t.status === 'abandoned',
+        change: (r) => { r.assessment = 'bad'; },
+      }),
+      act('Unmark', 'Clear the good/bad mark — back to not evaluated', {
+        did: 'Unmarked', verb: 'unmark', fits: t => !!t.assessment,
+        change: (r) => { delete r.assessment; },
+      }),
+      act('Un-nest', 'Detach from the parent, leaving each row at the top level', {
+        did: 'Un-nested', verb: 'un-nest', fits: t => !!t.parent_id || !!t.container,
+        change: (r) => { r.parent_id = null; r.container = null; },
+      }),
+      h('button.small.danger', {
+        type: 'button', title: 'Delete these rows and every reference to them',
+        onclick: () => deletePicked(picked, byId, children, ctx),
+      }, 'Delete'),
+      h('button.small', { type: 'button', onclick: () => { selected.clear(); ctx.rerender(); } },
+        'Clear'),
+    ),
   );
 }
 
@@ -438,7 +608,7 @@ function unnestZone() {
   return zone;
 }
 
-function row(t, { cols, prefs, byId, children, drag, ctx }, depth = 0, childCount = 0) {
+function row(t, { cols, prefs, byId, children, drag, ctx, sel }, depth = 0, childCount = 0) {
   const s = scores(t);
   const p = priority(t, prefs.w, prefs.alpha);
   const author = authorLine(t);
@@ -449,7 +619,23 @@ function row(t, { cols, prefs, byId, children, drag, ctx }, depth = 0, childCoun
   const meta = [author, t.year || null, t.journal || null,
     t.type !== 'article' ? t.type : null].filter(Boolean);
 
-  return makeDraggable(h('div.row', { dataset: { id: t.id } },
+  const box = sel
+    ? h('label.row-select', {
+      title: 'Select for a bulk action',
+      // A checkbox inside a draggable row: without this, pressing it starts a
+      // row drag instead of ticking the box.
+      onmousedown: e => e.stopPropagation(),
+      onclick: e => e.stopPropagation(),
+    },
+      h('input', {
+        type: 'checkbox', checked: sel.has(t.id), draggable: false,
+        'aria-label': `Select ${t.title || 'untitled'}`,
+        onchange: e => sel.toggle(t.id, e.target.checked),
+      }))
+    : null;
+
+  return makeDraggable(h(`div.row${sel && sel.has(t.id) ? '.picked' : ''}`, { dataset: { id: t.id } },
+    box,
     drag && drag.enabled
       ? h('span.drag-handle', { 'aria-hidden': 'true', title: 'Drag onto another row to nest it' }, '\u283F')
       : null,
@@ -606,11 +792,18 @@ function fmt1(v) { return v == null ? '' : Number(v).toFixed(1); }
  * never needs the mouse. Numeric keys to match Backfill's accept keys.
  */
 export function queueKeys(e, ctx) {
-  if (!'120'.includes(e.key)) return false;
+  if (!'120x'.includes(e.key)) return false;
   const el = document.activeElement && document.activeElement.closest
     ? document.activeElement.closest('.row')
     : null;
   if (!el || !el.dataset.id) return false;
+  if (e.key === 'x') {
+    e.preventDefault();
+    const id = el.dataset.id;
+    if (selected.has(id)) selected.delete(id); else selected.add(id);
+    ctx.rerender();
+    return true;
+  }
   const t = (state.doc.texts || []).find(x => x.id === el.dataset.id);
   if (!t || (t.status !== 'read' && t.status !== 'abandoned')) return false;
   e.preventDefault();
