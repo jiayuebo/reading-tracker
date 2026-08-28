@@ -10,7 +10,7 @@
 // So this module does two things: build one self-contained document to hand
 // over, and validate what comes back before a single field is written.
 
-import { authorLine, sortKeyTitle, todayISO, masteryLabel } from './model.js';
+import { authorLine, sortKeyTitle, todayISO, masteryLabel, orderOf } from './model.js';
 
 /** Seeded into `rubric.prose` the first time, then edited in the Evaluate view. */
 export const DEFAULT_PROMPT = `You are helping a philosophy PhD student decide what to read next, and what is worth
@@ -103,37 +103,118 @@ export const TARGET_SCOPES = {
   },
 };
 
-function bib(t) {
-  const bits = [authorLine(t), t.year || null, t.type !== 'article' ? t.type : null];
+function bib(t, { journal = true, author = true } = {}) {
+  const bits = [author ? authorLine(t) : null, t.year || null, t.type !== 'article' ? t.type : null];
   if (t.pages) bits.push(`${t.pages} pp`);
-  if (t.journal) bits.push(t.journal);
+  if (journal && t.journal) bits.push(t.journal);
   return bits.filter(Boolean).join(', ');
 }
 
-function corpusLine(t) {
-  const parts = [`- "${t.title}"`];
-  const b = bib(t);
+const NO_AUTHOR = 'No author recorded';
+
+/** Surname-ish key, so groups read as a bibliography rather than by forename. */
+function authorSortKey(name) {
+  if (name === NO_AUTHOR) return '\uffff';           // always last
+  const first = String(name).split(/\s*(?:&| et al\.)\s*/)[0].trim();
+  const parts = first.split(/\s+/);
+  return (parts[parts.length - 1] || first).toLowerCase();
+}
+
+/**
+ * Fold a flat list into author groups with children nested under their parent.
+ *
+ * The saving is pure redundancy: forty-one authors recur in the corpus, each
+ * repeating their own name, and every chapter repeated the title of the book it
+ * sits in. Neither carried information the heading and the indent do not.
+ *
+ * A child whose parent is not itself in this list stays top-level — it would
+ * otherwise vanish from the export entirely.
+ */
+function authorGroups(rows) {
+  const present = new Set(rows.map(t => t.id));
+  const kids = new Map();
+  const top = [];
+  for (const t of rows) {
+    if (t.parent_id && present.has(t.parent_id) && t.parent_id !== t.id) {
+      if (!kids.has(t.parent_id)) kids.set(t.parent_id, []);
+      kids.get(t.parent_id).push(t);
+    } else {
+      top.push(t);
+    }
+  }
+  const groups = new Map();
+  for (const t of top) {
+    const a = authorLine(t) || NO_AUTHOR;
+    if (!groups.has(a)) groups.set(a, []);
+    groups.get(a).push(t);
+  }
+  return [...groups.entries()]
+    .sort((x, y) => authorSortKey(x[0]).localeCompare(authorSortKey(y[0])))
+    .map(([author, items]) => ({
+      author,
+      items: items.sort((a, b) => sortKeyTitle(a).localeCompare(sortKeyTitle(b))),
+    }))
+    .map(g => ({ ...g, kids }));
+}
+
+/** Emit one row and its descendants, indented, in reading order. */
+function emit(out, t, kids, line, groupAuthor, indent, depth) {
+  if (depth > 6) return;
+  out.push(line(t, { indent, groupAuthor }));
+  const mine = (kids.get(t.id) || []).slice().sort((a, b) => {
+    const ka = orderOf(a); const kb = orderOf(b);
+    const A = ka == null ? [1, 0] : [0, ka];
+    const B = kb == null ? [1, 0] : [0, kb];
+    return (A[0] - B[0]) || (A[1] - B[1])
+      || sortKeyTitle(a).localeCompare(sortKeyTitle(b));
+  });
+  for (const k of mine) emit(out, k, kids, line, groupAuthor, `${indent}  `, depth + 1);
+}
+
+function renderGrouped(rows, line) {
+  const out = [];
+  for (const g of authorGroups(rows)) {
+    out.push(`\n### ${g.author}`);
+    for (const t of g.items) emit(out, t, g.kids, line, g.author, '', 0);
+  }
+  return out;
+}
+
+function corpusLine(t, { indent = '', groupAuthor = null } = {}) {
+  const parts = [`${indent}- "${t.title}"`];
+  // The heading already names the author, so only an exception is worth the
+  // characters — the Guyer and Wood introduction inside a Kant volume has to
+  // stay visible, or the corpus credits Kant with it.
+  const own = authorLine(t);
+  const b = bib(t, { journal: false, author: !!own && own !== groupAuthor });
   if (b) parts.push(`— ${b}`);
   if (t.assessment) parts.push(`[assessment: ${t.assessment}]`);
   const v = (t.verdict || '').trim();
-  if (v) parts.push(`\n    verdict: ${v}`);
+  if (v) parts.push(`\n${indent}    verdict: ${v}`);
   return parts.join(' ');
 }
 
-function targetLine(t, byId, relativeOnly) {
-  const parts = [`- id: ${t.id}`, `"${t.title}"`];
-  const b = bib(t);
+function targetLine(t, byId, relativeOnly, { indent = '', groupAuthor = null, nested = false } = {}) {
+  const parts = [`${indent}- id: ${t.id}`, `"${t.title}"`];
+  const own = authorLine(t);
+  // Journals stay on the rows being scored. Dropping them saves nothing here —
+  // no target currently carries one — and the venue is a real signal at the
+  // point where a judgement is actually being made.
+  const b = bib(t, { journal: true, author: !!own && own !== groupAuthor });
   if (b) parts.push(`— ${b}`);
   const parent = t.parent_id && byId.get(t.parent_id);
-  if (parent) parts.push(`[in: ${parent.title}]`);
+  // The indent already says what a nested row sits in. `[in: …]` is still the
+  // only thing locating a row whose parent is not in this list at all.
+  if (nested) { /* the indent says it */ }
+  else if (parent) parts.push(`[in: ${parent.title}]`);
   else if (t.container) parts.push(`[in: ${t.container}]`);
   if (relativeOnly) {
     // Carry the standing absolute score and cost so they are not re-derived,
     // and so an obviously wrong one can be spotted rather than silently kept.
     const p = t.predicted || {};
-    parts.push(`\n    standing: absolute ${p.value_abs}, cost ${p.cost}`
+    parts.push(`\n${indent}    standing: absolute ${p.value_abs}, cost ${p.cost}`
       + (p.value_rel != null ? `, relative ${p.value_rel} (v${p.rel_version || p.rubric_version || '?'})` : ', relative not set'));
-    if (p.reason_abs || p.reason) parts.push(`\n    absolute reason: ${p.reason_abs || p.reason}`);
+    if (p.reason_abs || p.reason) parts.push(`\n${indent}    absolute reason: ${p.reason_abs || p.reason}`);
   }
   return parts.join(' ');
 }
@@ -201,9 +282,10 @@ export function buildExport(doc, { corpusScope = 'pool', targetScope = 'unscored
 
   out.push(`\n\n## 3. Already read — ${corpus.length} texts (${CORPUS_SCOPES[corpusScope].label})\n`);
   const marked = corpus.filter(t => t.assessment).length;
-  out.push(`_${marked} of these carry an assessment mark. The rest are unmarked, which means `
-    + `not evaluated — not average._\n`);
-  for (const t of corpus) out.push(corpusLine(t));
+  out.push(`_Grouped by author; indented rows are parts of the work above them. Order carries `
+    + `no meaning. ${marked} of these carry an assessment mark. The rest are unmarked, which `
+    + `means not evaluated — not average._\n`);
+  out.push(...renderGrouped(corpus, corpusLine));
 
   const relativeOnly = !!TARGET_SCOPES[targetScope].relativeOnly;
   out.push(`\n\n## 4. To score — ${targets.length} rows\n`);
@@ -215,7 +297,8 @@ export function buildExport(doc, { corpusScope = 'pool', targetScope = 'unscored
       + 'section 2 as it stands today. Omitting a field leaves it untouched; returning it as null '
       + 'clears it.\n');
   }
-  for (const t of targets) out.push(targetLine(t, byId, relativeOnly));
+  out.push(...renderGrouped(targets,
+    (t, o) => targetLine(t, byId, relativeOnly, { ...o, nested: !!o.indent })));
   out.push(relativeOnly
     ? '\nReturn a JSON array of {id, value_rel, reason_rel} and nothing else.'
     : '\nReturn a JSON array covering these ids and nothing else.');
