@@ -22,7 +22,7 @@ const navEl = document.getElementById('nav');
 
 const ctx = {
   go: (hash) => { location.hash = hash; },
-  rerender: () => schedule(),
+  rerender: () => schedule(true),
   quickLog: () => quickLog(ctx),
   newText: () => newTextDialog(ctx),
   toast,
@@ -37,7 +37,13 @@ function route() {
 }
 
 let scheduled = false;
-function schedule() {
+// Views keep state of their own that the store knows nothing about — which
+// rows are ticked in the queue, where the backfill cursor is, which scope the
+// evaluate view is on. Those call ctx.rerender() explicitly, and it has to
+// rebuild the view even though neither the document nor the route moved.
+let forceView = false;
+function schedule(force) {
+  if (force) forceView = true;
   if (scheduled) return;
   scheduled = true;
   // A microtask, not requestAnimationFrame: rAF can be withheld indefinitely in
@@ -45,6 +51,10 @@ function schedule() {
   // leave it stuck on the loading screen until you focused it.
   queueMicrotask(() => { scheduled = false; render(); });
 }
+
+let lastRev = -1;
+let lastRoute = '';
+let lastDoc = null;
 
 function render() {
   const r = route();
@@ -54,6 +64,27 @@ function render() {
   renderNav(r);
   renderStatus();
   renderBanner();
+
+  // A sync-status change is not a document change. Autosave fires on a timer
+  // and walks the status from dirty to saving to saved, and rebuilding every
+  // field on screen for that was throwing away whatever was half-typed in the
+  // box the caret was sitting in. The chrome above always redraws; the view
+  // below only when the document or the route actually moved.
+  const routeKey = `${r.name}/${r.arg || ''}`;
+  const unchanged = !forceView
+    && state.doc
+    && state.doc === lastDoc
+    && state.rev === lastRev
+    && routeKey === lastRoute;
+  if (unchanged) {
+    restoreFocus(before);
+    maybeOpenConflict();
+    return;
+  }
+  forceView = false;
+  lastDoc = state.doc;
+  lastRev = state.rev;
+  lastRoute = routeKey;
 
   if (!state.doc) {
     renderWelcome(r);
@@ -86,14 +117,28 @@ function render() {
 function captureFocus() {
   const a = document.activeElement;
   if (!a || !a.id || a === document.body) return null;
-  const o = { id: a.id };
+  const o = { id: a.id, tag: a.tagName };
   if (typeof a.selectionStart === 'number') { o.start = a.selectionStart; o.end = a.selectionEnd; }
+  // Text fields commit on `change`, which fires at blur. So anything typed
+  // since the field was focused exists only in the DOM, and a rebuild from the
+  // stored document silently reverts it. Carry it across.
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'checkbox' && a.type !== 'radio') {
+    o.value = a.value;
+  }
   return o;
 }
 function restoreFocus(o) {
   if (!o) return;
   const el = document.getElementById(o.id);
-  if (!el || el === document.activeElement) return;
+  if (!el) return;
+  const same = el === document.activeElement;
+  // Only for a field that was rebuilt underneath the caret, and only when the
+  // rebuild actually changed what is in it — never overwrite a value the view
+  // deliberately recomputed while the user was elsewhere.
+  if (o.value != null && el.tagName === o.tag && !same && el.value !== o.value) {
+    el.value = o.value;
+  }
+  if (same) return;
   el.focus();
   if (o.start != null && typeof el.setSelectionRange === 'function') {
     try { el.setSelectionRange(o.start, o.end); } catch { /* type doesn't support it */ }
@@ -275,7 +320,7 @@ function keys(e) {
 // Tells the boot guard in index.html that the module graph loaded and ran.
 window.__trackerBooted = true;
 
-subscribe(schedule);
+subscribe(() => schedule());
 window.addEventListener('hashchange', schedule);
 document.addEventListener('keydown', keys);
 installGuards();

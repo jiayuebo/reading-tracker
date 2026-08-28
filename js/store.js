@@ -43,6 +43,13 @@ function lsJSON(k, fallback) {
 
 export const state = {
   doc: null,
+  /**
+   * Bumped whenever anything the view is built from changes — the document
+   * or the preferences — and never for a sync-status change. The view is rebuilt from this, so a background autosave flipping
+   * "dirty" to "saving" to "saved" no longer tears down and rebuilds every
+   * field on screen, which is what was discarding text mid-typing.
+   */
+  rev: 0,
   sha: null,            // remote blob sha this doc is based on
   dirty: false,
   status: 'init',       // init|notoken|loading|clean|dirty|saving|saved|offline|conflict|error
@@ -80,6 +87,9 @@ export const settings = {
 export function savePrefs(patch) {
   Object.assign(state.prefs, patch);
   lsSet(LS.prefs, JSON.stringify(state.prefs));
+  // Sort, filters and the weight sliders all change what the view shows, so
+  // this counts as a change the view is built from — unlike a save status.
+  state.rev++;
   emit();
 }
 
@@ -125,6 +135,7 @@ let autosaveTimer = null;
 export function mutate(fn) {
   if (!state.doc) return;
   fn(state.doc);
+  state.rev++;
   state.dirty = true;
   if (state.status !== 'conflict') {
     state.status = 'dirty';
@@ -151,6 +162,7 @@ export async function load({ force = false } = {}) {
   if (!settings.hasToken) {
     if (cache && cache.doc) {
       state.doc = cache.doc;
+      state.rev++;
       state.sha = cache.sha;
       state.dirty = !!cache.dirty;
       state.loadedFrom = 'cache';
@@ -175,6 +187,7 @@ export async function load({ force = false } = {}) {
     // Offline or unreachable: fall back to the mirror rather than showing nothing.
     if (cache && cache.doc && !force) {
       state.doc = cache.doc;
+      state.rev++;
       state.sha = cache.sha;
       state.dirty = !!cache.dirty;
       state.loadedFrom = 'cache';
@@ -213,6 +226,8 @@ export async function load({ force = false } = {}) {
   }
 
   state.doc = remoteDoc;
+
+  state.rev++;
   state.sha = remote.sha;
   state.dirty = false;
   state.loadedFrom = 'github';
@@ -229,6 +244,7 @@ export function resolveRestore(keepLocal) {
   state.pendingRestore = null;
   if (p && keepLocal) {
     state.doc = p.doc;
+    state.rev++;
     state.dirty = true;
     state.status = 'dirty';
     state.loadedFrom = 'cache';
@@ -319,6 +335,7 @@ export function resolveConflictTakeRemote() {
   if (!c || !c.remoteText) return false;
   try {
     state.doc = JSON.parse(c.remoteText);
+    state.rev++;
   } catch { return false; }
   state.sha = c.remoteSha;
   state.dirty = false;
@@ -350,6 +367,7 @@ export function importDoc(obj, { from = 'import' } = {}) {
   const errs = validateDoc(obj);
   if (errs.length) return errs;
   state.doc = obj;
+  state.rev++;
   state.dirty = true;
   state.status = 'dirty';
   state.loadedFrom = from;
@@ -362,6 +380,7 @@ export function importDoc(obj, { from = 'import' } = {}) {
 
 export function startEmpty() {
   state.doc = emptyDoc();
+  state.rev++;
   state.sha = null;
   state.dirty = false;
   state.loadedFrom = 'new';
