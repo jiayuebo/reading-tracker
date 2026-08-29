@@ -63,7 +63,7 @@ export function quickLog(ctx) {
   const familiarity = h('select',
     [['', '—'], ['0', '0 unfamiliar'], ['1', '1 some'], ['2', '2 good'], ['3', '3 expert']]
       .map(([v, l]) => h('option', { value: v }, l)));
-  const verdict = h('textarea', { rows: 2, placeholder: 'What it turned out to be worth, in a line.' });
+  const verdict = h('textarea', { rows: 2 });
 
   const flagBoxes = {
     notes_written: h('input', { type: 'checkbox' }),
@@ -79,17 +79,16 @@ export function quickLog(ctx) {
   const finishedBox = h('input', { type: 'checkbox', checked: true });
 
   let assessment = null;
-  const markBtns = h('div.actions');
+  const markBtns = h('span.ql-marks');
   const paintMarks = () => {
     mount(markBtns,
-      h(`button${assessment === 'good' ? '.primary' : ''}`, {
+      h(`button.small${assessment === 'good' ? '.primary' : ''}`, {
         type: 'button', onclick: () => { assessment = assessment === 'good' ? null : 'good'; paintMarks(); },
       }, 'Good'),
-      h(`button${assessment === 'bad' ? '.primary' : ''}`, {
+      h(`button.small${assessment === 'bad' ? '.primary' : ''}`, {
         type: 'button', onclick: () => { assessment = assessment === 'bad' ? null : 'bad'; paintMarks(); },
       }, 'Bad'),
-      h('span.spacer'),
-      h('span.hint.dim', assessment ? 'Click again to clear.' : 'Unmarked — not evaluated.'));
+    );
   };
   paintMarks();
 
@@ -160,79 +159,46 @@ export function quickLog(ctx) {
 
   const form = h('form.quicklog', { onsubmit: e => { e.preventDefault(); submit(); } },
     h('h2', 'Log something you read'),
-    h('p.hint', 'Only the title is required — type it and press Enter. Everything below is '
-      + 'optional, and anything left blank can be filled in later, or never.'),
-
-    h('section.card',
-      h('h2', 'Look it up'),
-      panel,
-      captured),
-
-    qlSection('Bibliographic', [
-      qlField('Title', title),
-      qlField('Authors', authors),
-      qlField('Year', year),
-      qlField('Type', type),
-      qlField('Journal or publication', journal, 'Where it appeared. Never used for nesting.'),
-    ]),
-
-    h('section.card',
-      h('h2', 'Parent'),
-      h('div.field.wide', h('label', 'Nest this under'), picker,
-        h('p.hint', 'Start typing a title.')),
-      h('div.field.wide', h('label', { for: 'ql-container' }, 'Parent title, not linked'),
-        Object.assign(container, { id: 'ql-container' }),
-        h('p.hint', 'Only for a parent with no record of its own. Ignored if you picked one above.'))),
-
-    qlSection('Effort', [
-      qlField('Pages', pages),
-      qlField('Estimated hours', estHours),
-      qlField('Familiarity', familiarity, 'Prior familiarity when you started — a rubric input, not an outcome.'),
-    ]),
-
-    h('section.card',
-      h('h2', 'Was it worth the hours?'),
+    panel,
+    captured,
+    h('div.ql-grid',
+      qlField('Title', title, 6),
+      qlField('Authors', authors, 3),
+      qlField('Year', year, 1),
+      qlField('Type', type, 2),
+      qlField('Journal', journal, 3),
+      qlField('Nest under', picker, 3),
+      qlField('Parent title, unlinked', container, 3),
+      qlField('Pages', pages, 1),
+      qlField('Est. hours', estHours, 1),
+      qlField('Familiarity', familiarity, 1),
+      qlField('Verdict', verdict, 6),
+    ),
+    h('div.ql-toggles',
       markBtns,
-      h('div.fields', h('div.field.wide',
-        h('label', { for: 'ql-verdict' }, 'Verdict'),
-        Object.assign(verdict, { id: 'ql-verdict' }),
-        h('p.hint', 'Good means you would have regretted missing it, not that you enjoyed it.'))),
-      h('div.field.wide', h('label', 'Flags'),
-        h('div.checks',
-          h('label.check', flagBoxes.notes_written, h('span', 'Notes written')),
-          h('label.check', flagBoxes.carded, h('span', 'Carded')),
-          h('label.check', flagBoxes.reread_wanted, h('span', 'Reread wanted'))))),
-
-    h('section.card',
-      h('h2', 'Dates'),
-      h('div.quicklog-dates',
+      h('span.ql-checks',
+        h('label.check', flagBoxes.notes_written, h('span', 'Notes')),
+        h('label.check', flagBoxes.carded, h('span', 'Cards')),
+        h('label.check', flagBoxes.reread_wanted, h('span', 'Reread')),
         h('label.check', startedBox, h('span', 'Started today')),
         h('label.check', finishedBox, h('span', 'Finished today'))),
-      h('p.hint', 'Untick either when you are reconstructing an old read. A blank date is an '
-        + 'ordinary state, not a gap — 214 rows already have one.')),
-
-    h('p.hint', 'Saved as ', h('code', 'read'), ' / ', h('code', 'off-list'),
-      ' — reading the model never ranked, which makes it the most useful calibration data you have.'),
+    ),
     h('div.actions',
       h('button.primary', { type: 'submit' }, 'Log it'),
       h('button', { type: 'button', onclick: () => dlg.destroy() }, 'Cancel')),
   );
 
   const dlg = openDialog(form);
-  // openDialog focuses the first control, which is now the lookup box. The
-  // title is what this screen is for, so take it back.
+  // openDialog focuses the first control, which is the lookup box. The title is
+  // what this screen is for, so take it back.
   title.focus();
   return dlg;
 }
 
-function qlSection(heading, children) {
-  return h('section.card', h('h2', heading), h('div.fields', children));
-}
-function qlField(label, control, hint) {
-  control.id = control.id || `ql-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`;
+function qlField(label, control, span) {
+  control.id = control.id || `ql-${label.toLowerCase().replace(/[^a-z]+/g, '-').replace(/-$/, '')}`;
   control.setAttribute('aria-label', label);
-  return h('div.field', h('label', { for: control.id }, label), control,
-    hint ? h('p.hint', hint) : null);
+  return h(`div.ql-field.span-${span}`, h('label', { for: control.id }, label), control);
 }
 
 /**

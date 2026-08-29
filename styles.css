@@ -564,14 +564,38 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
    empty until a lookup fills it. */
 .hint:empty { display: none; }
 
-.quicklog-dates { display: flex; gap: 1rem; flex-wrap: wrap; margin: .5rem 0 0; }
-/* The form is long now, so the dialog scrolls rather than running off-screen,
-   and the actions stay reachable at the bottom of the scroll. */
-.quicklog .card { margin: .75rem 0; }
-.quicklog .card h2 { font-size: .74rem; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); }
-dialog.modal { max-height: 88vh; }
-.modal-body { max-height: 88vh; overflow-y: auto; }
-.quicklog-dates .check { font-size: .85rem; }
+/* Quick-log is a capture form, not a document: one dense grid, every field
+   optional, and short enough that nothing needs scrolling. The scroll cap
+   below is a floor for small screens, not the normal case. */
+dialog.modal { max-height: 92vh; }
+.modal-body { max-height: 92vh; overflow-y: auto; }
+
+.quicklog h2 { margin: 0 0 .5rem; }
+.quicklog .lookup { margin: 0 0 .5rem; }
+.quicklog .ql-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: .4rem .6rem; }
+.quicklog .ql-field { display: flex; flex-direction: column; gap: .12rem; min-width: 0; }
+.quicklog .ql-field > label {
+  font-size: .64rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3);
+}
+.quicklog .span-1 { grid-column: span 1; }
+.quicklog .span-2 { grid-column: span 2; }
+.quicklog .span-3 { grid-column: span 3; }
+.quicklog .span-6 { grid-column: span 6; }
+.quicklog input, .quicklog select, .quicklog textarea { padding: .22rem .4rem; font-size: .88rem; }
+.quicklog textarea { resize: vertical; }
+.quicklog .picker-input { width: 100%; }
+.quicklog .picker-chosen { display: none; }
+
+.ql-toggles { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; margin: .6rem 0 .1rem; }
+.ql-marks { display: flex; gap: .3rem; }
+.ql-checks { display: flex; gap: .8rem; flex-wrap: wrap; }
+.ql-checks .check { font-size: .8rem; }
+.quicklog .actions { margin-top: .6rem; }
+
+@media (max-width: 640px) {
+  .quicklog .ql-grid { grid-template-columns: repeat(2, 1fr); }
+  .quicklog .span-3, .quicklog .span-6 { grid-column: span 2; }
+}
 
 
 /* ── comparison pool ─────────────────────────────────────────────── */
