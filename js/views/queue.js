@@ -19,7 +19,9 @@ import { state, savePrefs, mutate } from '../store.js';
 import {
   childIndex, byIdIndex, containerName, unreadPrerequisites, groupKey, MAX_DEPTH, descendantIds,
   authorLine, priority, isScored, scores, sortKeyTitle, fold, matchesQuery, todayISO, orderOf,
+  poolEligible, inPool,
 } from '../model.js';
+import { rowPicker } from './row-picker.js';
 
 // Checkboxes, unioned — not a dropdown of preset combinations. A dropdown made
 // "queued" and "queued + reading" look like two unrelated modes when one is a
@@ -138,7 +140,7 @@ export function renderQueue(root, ctx) {
 
     prefs.group !== false ? unnestZone() : null,
 
-    ordered.length ? selectionBar(ordered, picked, byId, children, ctx) : null,
+    ordered.length ? selectionBar(ordered, picked, byId, children, texts, doc, ctx) : null,
 
     ordered.length
       ? (forest
@@ -227,7 +229,151 @@ function deletePicked(picked, byId, children, ctx) {
     + ' Save when ready.');
 }
 
-function selectionBar(ordered, picked, byId, children, ctx) {
+/**
+ * Re-parent every selected row at once.
+ *
+ * The banned set is the whole point: a parent cannot be one of the rows being
+ * moved, nor a descendant of one, or the move builds a cycle and the queue's
+ * forest walk hits its depth guard instead of drawing anything.
+ */
+function nestPicked(picked, texts, children, ctx) {
+  const ids = new Set(picked.map(t => t.id));
+  const banned = new Set(ids);
+  for (const t of picked) for (const d of descendantIds(t.id, children)) banned.add(d);
+
+  const status = h('p.hint');
+  let choice = null;
+  const apply = () => {
+    if (!choice) { status.className = 'hint bad'; status.textContent = 'Pick a parent first.'; return; }
+    mutate(d => {
+      for (const row of d.texts) {
+        if (!ids.has(row.id)) continue;
+        row.parent_id = choice;
+        // A linked parent wins over the free-text one, so leaving the old
+        // string behind would only ever be confusing.
+        if (row.container) row.container = null;
+      }
+    });
+    const title = (texts.find(x => x.id === choice) || {}).title || 'it';
+    dlg.destroy();
+    selected.clear();
+    ctx.toast(`Nested ${picked.length} row${picked.length === 1 ? '' : 's'} under “${title}”.`);
+    ctx.rerender();
+  };
+
+  const body = h('div',
+    h('h2', `Nest ${picked.length} row${picked.length === 1 ? '' : 's'} under…`),
+    h('p.hint', 'The rows being moved, and anything already nested under them, are not offered — '
+      + 'a row cannot become its own ancestor.'),
+    rowPicker({
+      texts, value: null, banned,
+      placeholder: 'Type to find a parent…',
+      onChange: (id) => { choice = id; status.textContent = ''; status.className = 'hint'; },
+    }),
+    status,
+    h('div.actions',
+      h('button.primary', { type: 'button', onclick: apply }, 'Nest them'),
+      h('button', { type: 'button', onclick: () => dlg.destroy() }, 'Cancel')));
+  const dlg = openBareDialog(body);
+  return dlg;
+}
+
+/**
+ * A dialog without importing the whole dialogs module, which would be circular:
+ * dialogs.js already imports from the model and the lookup, and the queue is
+ * what dialogs.js opens onto.
+ */
+function openBareDialog(...content) {
+  const dlg = h('dialog.modal', h('div.modal-body', content));
+  dlg.destroy = () => {
+    try { dlg.close(); } catch { /* already closed */ }
+    dlg.remove();
+    document.dispatchEvent(new CustomEvent('modal-closed'));
+  };
+  document.body.append(dlg);
+  dlg.addEventListener('cancel', () => setTimeout(() => dlg.destroy(), 0));
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.destroy(); });
+  dlg.showModal();
+  const first = dlg.querySelector('input, textarea, select, button');
+  if (first) first.focus();
+  return dlg;
+}
+
+/**
+ * Subjects as a select rather than a button per subject: the bar is already
+ * crowded, and the list grows as subjects are added. Selecting acts at once and
+ * snaps back, because there is nothing to "confirm" — the action is the choice.
+ */
+function subjectAdder(picked, doc, ctx) {
+  const subjects = doc.subjects || [];
+  if (!subjects.length) return null;
+  const sel = h('select.small', { 'aria-label': 'Add the selected rows to a subject' },
+    h('option', { value: '' }, 'Add to subject…'),
+    subjects.map(sub => h('option', { value: sub.id }, sub.name)));
+  sel.onchange = (e) => {
+    const id = e.target.value;
+    e.target.value = '';
+    if (!id) return;
+    const ids = new Set(picked.map(t => t.id));
+    let added = 0;
+    mutate(d => {
+      for (const row of d.texts) {
+        if (!ids.has(row.id)) continue;
+        const cur = row.subject_ids || [];
+        if (cur.includes(id)) continue;
+        row.subject_ids = [...cur, id];
+        added++;
+      }
+    });
+    const name = (subjects.find(x => x.id === id) || {}).name || 'the subject';
+    ctx.toast(added
+      ? `Added ${added} row${added === 1 ? '' : 's'} to ${name}`
+        + (added < picked.length ? `; ${picked.length - added} were already on it.` : '.')
+      : `All ${picked.length} were already on ${name}.`);
+  };
+  return sel;
+}
+
+/**
+ * The pool is the read corpus an evaluation is handed as context, so only rows
+ * that are actually eligible can go in — a queued row has nothing to say about
+ * what reading was worth. Ineligible selections are reported, not silently
+ * dropped.
+ */
+function poolButtons(picked, ctx) {
+  const eligible = picked.filter(poolEligible);
+  const addable = eligible.filter(t => !inPool(t));
+  const removable = picked.filter(t => inPool(t));
+  const set = (rows, on, verb) => {
+    const ids = new Set(rows.map(t => t.id));
+    mutate(d => {
+      for (const row of d.texts) {
+        if (!ids.has(row.id)) continue;
+        if (on) row.in_pool = true; else delete row.in_pool;
+      }
+    });
+    ctx.toast(`${verb} ${rows.length} row${rows.length === 1 ? '' : 's'}`
+      + (picked.length - rows.length
+        ? `; left ${picked.length - rows.length} alone.`
+        : '.'));
+  };
+  return [
+    addable.length
+      ? h('button.small', {
+        type: 'button', title: 'Add the eligible read rows to the comparison pool',
+        onclick: () => set(addable, true, 'Added to the pool:'),
+      }, `Pool +${addable.length}`)
+      : null,
+    removable.length
+      ? h('button.small', {
+        type: 'button', title: 'Take these out of the comparison pool',
+        onclick: () => set(removable, false, 'Removed from the pool:'),
+      }, `Pool −${removable.length}`)
+      : null,
+  ];
+}
+
+function selectionBar(ordered, picked, byId, children, texts, doc, ctx) {
   const all = picked.length === ordered.length && ordered.length > 0;
   const master = h('input', {
     type: 'checkbox', checked: all,
@@ -286,6 +432,12 @@ function selectionBar(ordered, picked, byId, children, ctx) {
         did: 'Un-nested', verb: 'un-nest', fits: t => !!t.parent_id || !!t.container,
         change: (r) => { r.parent_id = null; r.container = null; },
       }),
+      h('button.small', {
+        type: 'button', title: 'Move all of these under one parent row',
+        onclick: () => nestPicked(picked, texts, children, ctx),
+      }, 'Nest under…'),
+      subjectAdder(picked, doc, ctx),
+      poolButtons(picked, ctx),
       h('button.small.danger', {
         type: 'button', title: 'Delete these rows and every reference to them',
         onclick: () => deletePicked(picked, byId, children, ctx),

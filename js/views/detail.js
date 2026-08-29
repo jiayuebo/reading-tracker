@@ -269,12 +269,16 @@ function scoreSection(t, setIn, q) {
   const scored = t.status === 'read' || t.status === 'abandoned';
   return h('section.card',
     h('h2', 'Value and cost'),
-    h('p.hint', 'Optional in phase 1 and empty on every imported row. Type numbers in by hand if you want the queue to sort by priority before the comparison machinery exists.'),
+    h('p.hint', 'Predicted comes from an evaluation, or can be typed in. ',
+      h('strong', 'Realized'), ' is yours to enter once the text is finished — what it '
+      + 'actually turned out to be worth, on the same 0–10 scale. The gap between the two '
+      + 'is the only check on whether the scoring is any good.'),
     h('div.scores',
       scoreRow('Predicted', p, (k, v) => setIn('predicted', k, v), true),
       scoreRow('Realized', r, (k, v) => setIn('realized', k, v), scored,
         scored ? null : 'Realized scores are for finished texts.'),
-      scoreRow('Latent (fitted)', l, null, false, 'Written by the Bradley-Terry fit in phase 2.'),
+      scoreRow('Latent (fitted)', l, null, false,
+        'Left over from the retired Bradley-Terry fit. Nothing writes here now.'),
     ),
     reasonLines(t.predicted || {}),
     scoreProvenance(t.predicted || {}),
