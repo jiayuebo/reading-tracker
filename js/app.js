@@ -6,6 +6,7 @@ import {
   state, settings, load, save, subscribe, installGuards, resolveRestore, startEmpty,
 } from './store.js';
 import { renderQueue, queueKeys } from './views/queue.js';
+import { renderLog } from './views/log.js';
 import { renderTriage } from './views/triage.js';
 import { renderBackfill, backfillKeys } from './views/backfill.js';
 import { renderPool } from './views/pool.js';
@@ -90,7 +91,8 @@ function render() {
     renderWelcome(r);
   } else {
     try {
-      if (r.name === 'triage') renderTriage(view, ctx);
+      if (r.name === 'log') renderLog(view, ctx);
+      else if (r.name === 'triage') renderTriage(view, ctx);
       else if (r.name === 'backfill') renderBackfill(view, ctx);
       else if (r.name === 'pool') renderPool(view, ctx);
       else if (r.name === 'evaluate') renderEvaluate(view, ctx);
@@ -156,6 +158,7 @@ function renderNav(r) {
     triageCount || r.name === 'triage'
       ? navLink('#/triage', triageCount ? `Triage ${triageCount}` : 'Triage', r.name === 'triage')
       : null,
+    navLink('#/log', 'Log', r.name === 'log'),
     navLink('#/backfill', 'Backfill', r.name === 'backfill'),
     navLink('#/subjects', 'Subjects', r.name === 'subjects' || r.name === 'subject'),
     navLink('#/pool', 'Pool', r.name === 'pool'),
@@ -279,7 +282,7 @@ function keys(e) {
 
   if (pendingG) {
     pendingG = false;
-    const map = { q: '#/queue', t: '#/triage', s: '#/settings', b: '#/backfill', p: '#/pool', e: '#/evaluate', u: '#/subjects' };
+    const map = { q: '#/queue', t: '#/triage', s: '#/settings', b: '#/backfill', p: '#/pool', e: '#/evaluate', u: '#/subjects', l: '#/log' };
     if (map[e.key]) { e.preventDefault(); location.hash = map[e.key]; }
     return;
   }
