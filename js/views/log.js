@@ -9,7 +9,7 @@
 
 import { h, mount } from '../dom.js';
 import { state } from '../store.js';
-import { authorLine, sortKeyTitle, STATUS_LABEL } from '../model.js';
+import { authorLine, sortKeyTitle, STATUS_LABEL, childIndex } from '../model.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -119,6 +119,45 @@ export function renderLog(root, ctx) {
   const texts = (state.doc && state.doc.texts) || [];
   const finished = texts.filter(t => t.status === 'read' || t.status === 'abandoned');
   const dated = finished.filter(t => t.date_finished);
+
+  /**
+   * Finishing a book by finishing its chapters logs both, and counting both
+   * says you read the thing twice.
+   *
+   * Two different corrections, because the two numbers mean different things.
+   *
+   * A work is counted at the outermost dated row: read Language, Thought and
+   * Other Biological Categories chapter by chapter and also mark the book
+   * finished, and that is one book read, not one book and seven chapters.
+   *
+   * Pages net out instead of collapsing, so each month keeps the share it
+   * earned. A row contributes its own page count minus the pages of its dated
+   * descendants — the chapters land in the months you read them, the book
+   * contributes only the remainder, and the total is the book. It also works
+   * the other way round: a book with no page count of its own contributes
+   * nothing and its chapters still count, which collapsing would have lost.
+   */
+  const kids = childIndex(texts);
+  const byId = new Map(texts.map(t => [t.id, t]));
+  const isDated = new Set(dated.map(t => t.id));
+
+  const subsumed = (t) => {
+    let p = t.parent_id, guard = 0;
+    while (p && guard++ < 12) {
+      if (isDated.has(p)) return true;
+      p = (byId.get(p) || {}).parent_id;
+    }
+    return false;
+  };
+  const datedDescendantPages = (t, guard = 0) => {
+    if (guard > 12) return 0;
+    return (kids.get(t.id) || []).reduce((sum, k) =>
+      sum + (isDated.has(k.id) ? (k.pages || 0) : 0) + datedDescendantPages(k, guard + 1), 0);
+  };
+  const netPages = (t) => Math.max(0, (t.pages || 0) - datedDescendantPages(t));
+
+  const works = dated.filter(t => !subsumed(t));
+  const rolledUp = dated.length - works.length;
   const undated = finished.filter(t => !t.date_finished);
   const reading = texts.filter(t => t.status === 'reading');
 
@@ -142,29 +181,36 @@ export function renderLog(root, ctx) {
   const counts = {};
   const pages = {};
   for (const key of SOURCE_ORDER) { counts[key] = {}; pages[key] = {}; }
-  for (const t of dated) {
+  const srcOf = t => (SOURCE_ORDER.includes(t.source) ? t.source : 'queue');
+  for (const t of works) {
     const k = t.date_finished.slice(0, 7);
-    const src = SOURCE_ORDER.includes(t.source) ? t.source : 'queue';
-    counts[src][k] = (counts[src][k] || 0) + 1;
-    pages[src][k] = (pages[src][k] || 0) + (t.pages || 0);
+    counts[srcOf(t)][k] = (counts[srcOf(t)][k] || 0) + 1;
+  }
+  for (const t of dated) {
+    const n = netPages(t);
+    if (!n) continue;
+    const k = t.date_finished.slice(0, 7);
+    pages[srcOf(t)][k] = (pages[srcOf(t)][k] || 0) + n;
   }
 
-  const pagesTotal = dated.reduce((s, t) => s + (t.pages || 0), 0);
-  const withPages = dated.filter(t => t.pages).length;
+  const pagesTotal = dated.reduce((s, t) => s + netPages(t), 0);
+  const withPages = dated.filter(t => netPages(t) > 0).length;
   const good = finished.filter(t => t.assessment === 'good').length;
   const bad = finished.filter(t => t.assessment === 'bad').length;
-  const perMonth = monthKeys.length ? (dated.length / monthKeys.length) : 0;
+  const perMonth = monthKeys.length ? (works.length / monthKeys.length) : 0;
 
   mount(root,
     h('header.view-head',
       h('h1', 'Log'),
       h('p.counts',
         `${finished.length} finished · ${dated.length} with a date · `,
-        undated.length ? `${undated.length} without` : 'all dated'),
+        undated.length ? `${undated.length} without` : 'all dated',
+        rolledUp ? ` · ${rolledUp} counted under a parent` : null),
     ),
 
     h('div.log-stats',
-      stat(dated.length, 'dated', monthKeys.length ? `over ${monthKeys.length} months` : null),
+      stat(works.length, 'works',
+        rolledUp ? `${rolledUp} chapters counted in their book` : 'nothing nested'),
       stat(perMonth ? perMonth.toFixed(1) : '—', 'per month', 'average across the span'),
       stat(pagesTotal ? pagesTotal.toLocaleString() : '—', 'pages',
         withPages ? `from ${withPages} rows that record them` : 'none recorded'),
@@ -172,11 +218,11 @@ export function renderLog(root, ctx) {
     ),
 
     dated.length ? h('section.card',
-      h('div.card-head', h('h2', 'Texts finished'), legend()),
+      h('div.card-head', h('h2', 'Works finished'), legend()),
       barChart({
         months: monthKeys, stacks: counts, keys: SOURCE_ORDER, labelOf: monthLabel,
-        valueLabel: 'Texts finished',
-        summary: `${dated.length} texts across ${monthKeys.length} months.`,
+        valueLabel: 'Works finished',
+        summary: `${works.length} works across ${monthKeys.length} months.`,
       }),
     ) : null,
 
@@ -187,8 +233,9 @@ export function renderLog(root, ctx) {
         valueLabel: 'Pages finished',
         summary: `${pagesTotal} pages across ${monthKeys.length} months.`,
       }),
-      h('p.hint', `Only ${withPages} of ${dated.length} dated rows record a page count, so this `
-        + 'is a floor, not a total.'),
+      h('p.hint', `Only ${withPages} of ${dated.length} dated rows contribute a page count, so `
+        + 'this is a floor, not a total. Chapters of a book you also marked finished are netted '
+        + 'out, so nothing is counted twice.'),
     ) : null,
 
     reading.length ? h('section.card',
@@ -201,7 +248,9 @@ export function renderLog(root, ctx) {
     ...[...byMonth.keys()].sort().reverse().map(k => h('section.card',
       h('div.card-head',
         h('h2', monthLabel(k)),
-        h('span.dim.small', `${byMonth.get(k).length} · ${byMonth.get(k).reduce((s, t) => s + (t.pages || 0), 0) || '—'} pp`)),
+        h('span.dim.small',
+          `${byMonth.get(k).filter(x => !subsumed(x)).length} · `
+          + `${byMonth.get(k).reduce((s, t) => s + netPages(t), 0) || '—'} pp`)),
       h('ul.log-list', byMonth.get(k)
         .slice().sort((a, b) => (b.date_finished || '').localeCompare(a.date_finished || '')
           || sortKeyTitle(a).localeCompare(sortKeyTitle(b)))

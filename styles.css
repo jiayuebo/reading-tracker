@@ -770,8 +770,17 @@ dialog.modal { max-height: 92vh; }
 
 .bib-row, .state-row {
   display: grid; grid-template-columns: repeat(12, 1fr);
-  gap: .4rem .6rem; align-items: end;
+  /* `start`, not `end`: aligning the bottoms let the labels drift apart
+     whenever an input, a select and a textarea disagreed about their height.
+     Pinning the controls to one height aligns both edges at once. */
+  gap: .4rem .6rem; align-items: start;
 }
+.bib-row .grid-field > input,
+.bib-row .grid-field > select,
+.bib-row .grid-field > textarea {
+  height: 2.1rem; line-height: 1.3; box-sizing: border-box;
+}
+.bib-row .grid-field > textarea { padding-top: .35rem; overflow-y: auto; }
 .grid-field { display: flex; flex-direction: column; gap: .12rem; min-width: 0; }
 .grid-field > label {
   font-size: .64rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3);

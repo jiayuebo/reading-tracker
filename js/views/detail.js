@@ -93,15 +93,15 @@ export function renderDetail(root, ctx, id) {
           value: (t.authors || []).join('\n'),
           onchange: e => set({ authors: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) }),
         }), 3),
+        gridField('Journal', h('input', {
+          type: 'text', value: t.journal || '', placeholder: 'e.g. Nous',
+          onchange: e => set({ journal: e.target.value.trim() || null }),
+        }), 2),
         gridField('Year', h('input', {
           type: 'number', min: 0, max: 3000, value: t.year ?? '',
           onchange: e => set({ year: numOrNull(e.target.value) }),
         }), 1),
         gridField('Type', selectEl(TYPES.map(x => [x, x]), t.type, v => set({ type: v })), 2),
-        gridField('Journal', h('input', {
-          type: 'text', value: t.journal || '', placeholder: 'e.g. Nous',
-          onchange: e => set({ journal: e.target.value.trim() || null }),
-        }), 2),
       )),
 
     h('section.card',
