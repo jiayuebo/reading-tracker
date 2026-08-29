@@ -765,3 +765,42 @@ dialog.modal { max-height: 92vh; }
 
 .log-undated { padding: .9rem 1rem; }
 .log-undated summary { cursor: pointer; font-weight: 600; }
+
+/* ── detail: single-row cards ────────────────────────────────────── */
+
+.bib-row, .state-row {
+  display: grid; grid-template-columns: repeat(12, 1fr);
+  gap: .4rem .6rem; align-items: end;
+}
+.grid-field { display: flex; flex-direction: column; gap: .12rem; min-width: 0; }
+.grid-field > label {
+  font-size: .64rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3);
+}
+.grid-field textarea { resize: vertical; }
+.gf-1 { grid-column: span 1; }
+.gf-2 { grid-column: span 2; }
+.gf-3 { grid-column: span 3; }
+.gf-4 { grid-column: span 4; }
+
+/* Marks and flags share the remaining columns of the state row. */
+.state-rest {
+  grid-column: span 8; display: flex; align-items: center; gap: 1rem;
+  flex-wrap: wrap; padding-bottom: .2rem;
+}
+.state-marks { display: flex; gap: .3rem; }
+.state-checks { display: flex; gap: .8rem; flex-wrap: wrap; }
+.state-checks .check { font-size: .82rem; }
+
+.date-field { display: flex; align-items: center; gap: .4rem; }
+button.small.linkish {
+  border: 0; background: none; color: var(--ink-3); padding: .1rem .2rem;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+button.small.linkish:hover { color: var(--bad); }
+
+@media (max-width: 720px) {
+  .bib-row, .state-row { grid-template-columns: repeat(4, 1fr); }
+  .gf-3, .gf-4 { grid-column: span 4; }
+  .gf-2 { grid-column: span 2; }
+  .state-rest { grid-column: span 4; }
+}

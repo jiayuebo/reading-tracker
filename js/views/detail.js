@@ -69,8 +69,7 @@ export function renderDetail(root, ctx, id) {
 
     lookupEnabled() ? h('section.card',
       h('h2', 'Look up metadata'),
-      h('p.hint', 'Fills only fields that are still empty, so anything you corrected by hand stays. '
-        + 'Type is the exception: a value of "book" left over from the import is replaced when a real record disagrees.'),
+      h('p.hint', 'Fills only fields that are still empty.'),
       lookupPanel((c) => {
         let changed = [];
         mutate(d => { changed = applyCandidate(d.texts.find(x => x.id === t.id), c); });
@@ -81,25 +80,29 @@ export function renderDetail(root, ctx, id) {
       }, { compareTo: t, placeholder: t.title ? `DOI, ISBN, JSTOR link, or "${t.title.slice(0, 30)}"` : 'DOI, ISBN, JSTOR link, or title...' }),
     ) : null,
 
-    section('Bibliographic', [
-      field('Title', h('input', { type: 'text', value: t.title || '', onchange: e => set({ title: e.target.value }) })),
-      field('Authors', h('textarea', {
-        rows: Math.max(2, (t.authors || []).length + 1),
-        placeholder: 'One per line',
-        value: (t.authors || []).join('\n'),
-        onchange: e => set({ authors: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) }),
-      }), (t.authors || []).length ? null : 'Empty on 20 imported rows — the author is often inside the title instead.'),
-      field('Year', h('input', {
-        type: 'number', min: 0, max: 3000, value: t.year ?? '',
-        onchange: e => set({ year: numOrNull(e.target.value) }),
-      })),
-      field('Type', selectEl(TYPES.map(x => [x, x]), t.type, v => set({ type: v })),
-        'Unknown rows were imported as “book”; correct it here.'),
-      field('Journal or publication', h('input', {
-        type: 'text', value: t.journal || '', placeholder: 'e.g. Nous',
-        onchange: e => set({ journal: e.target.value.trim() || null }),
-      }), 'Where it appeared. Shown for reference; never used for nesting.'),
-    ]),
+    h('section.card',
+      h('h2', 'Bibliographic'),
+      // One row. Title and authors take the width because they are the fields
+      // that actually hold long strings; year and type need almost none.
+      h('div.bib-row',
+        gridField('Title', h('input', {
+          type: 'text', value: t.title || '', onchange: e => set({ title: e.target.value }),
+        }), 4),
+        gridField('Authors', h('textarea', {
+          rows: 1, placeholder: 'One per line',
+          value: (t.authors || []).join('\n'),
+          onchange: e => set({ authors: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) }),
+        }), 3),
+        gridField('Year', h('input', {
+          type: 'number', min: 0, max: 3000, value: t.year ?? '',
+          onchange: e => set({ year: numOrNull(e.target.value) }),
+        }), 1),
+        gridField('Type', selectEl(TYPES.map(x => [x, x]), t.type, v => set({ type: v })), 2),
+        gridField('Journal', h('input', {
+          type: 'text', value: t.journal || '', placeholder: 'e.g. Nous',
+          onchange: e => set({ journal: e.target.value.trim() || null }),
+        }), 2),
+      )),
 
     h('section.card',
       h('h2', 'Parent'),
@@ -117,21 +120,32 @@ export function renderDetail(root, ctx, id) {
           + 'string until you link a real row above, which takes precedence.')),
     ),
 
-    t.status === 'read' || t.status === 'abandoned' ? assessmentCard(t, setAssessment) : null,
 
     (doc.subjects || []).length ? subjectsCard(t, doc, set) : null,
 
-    section('State', [
-      field('Status', selectEl(STATUSES.map(x => [x, STATUS_LABEL[x]]), t.status, v => set({ status: v }))),
-      field('Source', selectEl(SOURCES.map(x => [x, x]), t.source || 'queue', v => set({ source: v })),
-        'Anything but “queue” was never scored by the model — those are the calibration controls (spec §4).'),
-      flags([
-        ['notes_written', 'Notes written'],
-        ['carded', 'Carded'],
-        ['reread_wanted', 'Reread wanted'],
-        ...(poolEligible(t) ? [['in_pool', 'In the comparison pool']] : []),
-      ], t, set),
-    ]),
+    h('section.card',
+      h('h2', 'State'),
+      h('div.state-row',
+        gridField('Status', selectEl(STATUSES.map(x => [x, STATUS_LABEL[x]]), t.status, v => set({ status: v })), 2),
+        gridField('Source', selectEl(SOURCES.map(x => [x, x]), t.source || 'queue', v => set({ source: v })), 2),
+        h('div.state-rest',
+          t.status === 'read' || t.status === 'abandoned'
+            ? h('span.state-marks',
+              markButton(t, 'good', 'Good', setAssessment),
+              markButton(t, 'bad', 'Bad', setAssessment))
+            : null,
+          h('span.state-checks',
+            checkbox(t, 'notes_written', 'Notes', set),
+            checkbox(t, 'carded', 'Cards', set),
+            checkbox(t, 'reread_wanted', 'Reread', set),
+            poolEligible(t) ? checkbox(t, 'in_pool', 'In pool', set) : null))),
+      // The one piece of copy here that is load-bearing: without it "good"
+      // drifts into meaning "enjoyed", and the mark stops tracking the thing
+      // the evaluation is calibrated against.
+      t.status === 'read' || t.status === 'abandoned'
+        ? h('p.hint', 'Good means you would have regretted missing it, not that you enjoyed it. '
+          + 'Unmarked is not a middling score — it means not evaluated.')
+        : null),
 
     section('Effort', [
       field('Pages', h('input', { type: 'number', min: 0, value: t.pages ?? '', onchange: e => set({ pages: numOrNull(e.target.value) }) })),
@@ -165,8 +179,8 @@ export function renderDetail(root, ctx, id) {
 
     section('Dates', [
       field('Added', dateInput(t.date_added, v => set({ date_added: v }))),
-      field('Started', dateInput(t.date_started, v => set({ date_started: v }))),
-      field('Finished', dateInput(t.date_finished, v => set({ date_finished: v }))),
+      field('Started', clearableDate(t.date_started, v => set({ date_started: v }))),
+      field('Finished', clearableDate(t.date_finished, v => set({ date_finished: v }))),
     ]),
 
     kids.length || t.type === 'book' ? childList(t, kids, ctx) : null,
@@ -245,22 +259,6 @@ function subjectsCard(t, doc, set) {
       + 'attach it from the subject instead — both are kept.'));
 }
 
-function assessmentCard(t, setAssessment) {
-  const btn = (value, label) => h(`button${t.assessment === value ? '.primary' : ''}`, {
-    onclick: () => setAssessment(t.assessment === value ? null : value),
-  }, label);
-  return h('section.card',
-    h('h2', 'Was it worth the hours?'),
-    h('div.actions',
-      btn('good', 'Good'),
-      btn('bad', 'Bad'),
-      h('span.spacer'),
-      h('span.hint.dim', t.assessment ? 'Click again to clear.' : 'Unmarked — not evaluated.')),
-    h('p.hint', 'Good means you would have regretted missing it; bad means the hours did not pay. '
-      + 'Not whether you enjoyed it — Begriffsschrift is a grind and belongs in good. '
-      + 'Leaving it unmarked is fine and is not read as a middling score.'),
-  );
-}
 
 function scoreSection(t, setIn, q) {
   const p = t.predicted || {};
@@ -421,6 +419,43 @@ function parentPicker(t, texts, children, set) {
   });
 }
 
+/** A labelled control that occupies `span` columns of a 12-column row. */
+function gridField(label, control, span) {
+  control.id = control.id || `f-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`;
+  return h(`div.grid-field.gf-${span}`,
+    h('label', { for: control.id }, label), control);
+}
+
+function checkbox(t, key, label, set) {
+  return h('label.check',
+    h('input', { type: 'checkbox', checked: !!t[key], onchange: e => set({ [key]: e.target.checked }) }),
+    h('span', label));
+}
+
+function markButton(t, value, label, setAssessment) {
+  return h(`button.small${t.assessment === value ? '.primary' : ''}`, {
+    type: 'button',
+    'aria-pressed': t.assessment === value ? 'true' : 'false',
+    onclick: () => setAssessment(t.assessment === value ? null : value),
+  }, label);
+}
+
+/**
+ * A date with a way to unset it. `input[type=date]` can be cleared from the
+ * keyboard but the control gives no visible affordance for it, and a null date
+ * is a real state here — 213 finished rows carry one — not an oversight.
+ */
+function clearableDate(value, onchange) {
+  const input = dateInput(value, onchange);
+  return h('span.date-field', input,
+    value
+      ? h('button.small.linkish', {
+        type: 'button', title: 'Clear this date',
+        onclick: () => onchange(null),
+      }, 'Clear')
+      : null);
+}
+
 function dateInput(value, onchange) {
   return h('input', {
     type: 'date', value: value || '',
@@ -428,14 +463,6 @@ function dateInput(value, onchange) {
   });
 }
 
-function flags(list, t, set) {
-  return h('div.field.wide', h('label', 'Flags'),
-    h('div.checks', list.map(([key, label]) =>
-      h('label.check',
-        h('input', { type: 'checkbox', checked: !!t[key], onchange: e => set({ [key]: e.target.checked }) }),
-        h('span', label)))),
-    h('p.hint', 'Notes and cards are independent, not stages — a text can be carded without notes.'));
-}
 
 function numOrNull(v) {
   const s = String(v).trim();

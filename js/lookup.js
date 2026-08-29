@@ -334,17 +334,12 @@ export function applyCandidate(row, c, { overwrite = false } = {}) {
   put('journal', c.journal);
   if (c.doi) put('doi', c.doi);
   if (c.isbn) put('isbn', c.isbn);
-  // `type` is the field the import got wrong most often, so it is the one field
-  // worth correcting even when already set. Only when the record is plausibly
-  // the same work, though — otherwise a review of a book turns the book into an
-  // article, which is precisely the corruption this guard exists to prevent.
-  if (c.type && row.type !== c.type) {
-    const wasDefaulted = row.type === 'book' && !c.type.startsWith('book');
-    if (overwrite || !row.type || (wasDefaulted && authorsAgree(row, c))) {
-      row.type = c.type;
-      changed.push('type');
-    }
-  }
+  // `type` used to be corrected even when already set, because the import
+  // defaulted everything it could not identify to "book". Those rows have since
+  // been fixed by hand, so the exception now only risks turning a corrected type
+  // back into whatever a catalogue happens to say — Crossref calls plenty of
+  // chapters "book-part". It fills an empty type and nothing more.
+  put('type', c.type);
   return changed;
 }
 
