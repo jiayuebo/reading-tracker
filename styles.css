@@ -564,11 +564,15 @@ dialog.modal::backdrop { background: rgb(10 12 16 / .45); }
    empty until a lookup fills it. */
 .hint:empty { display: none; }
 
-/* Quick-log's lookup is collapsed by default: the two-field path is the point
-   of that screen, and an open search box in front of it invites a detour. */
-.quicklog-lookup { margin-top: .75rem; border-top: 1px solid var(--rule); padding-top: .6rem; }
-.quicklog-lookup summary { cursor: pointer; color: var(--ink-3); }
-.quicklog-lookup[open] summary { margin-bottom: .35rem; }
+.quicklog-dates { display: flex; gap: 1rem; flex-wrap: wrap; margin: .5rem 0 0; }
+/* The form is long now, so the dialog scrolls rather than running off-screen,
+   and the actions stay reachable at the bottom of the scroll. */
+.quicklog .card { margin: .75rem 0; }
+.quicklog .card h2 { font-size: .74rem; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); }
+dialog.modal { max-height: 88vh; }
+.modal-body { max-height: 88vh; overflow-y: auto; }
+.quicklog-dates .check { font-size: .85rem; }
+
 
 /* ── comparison pool ─────────────────────────────────────────────── */
 

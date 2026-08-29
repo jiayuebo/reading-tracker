@@ -5,6 +5,7 @@ import { h, mount } from '../dom.js';
 import { state, mutate, serialize, resolveConflictTakeRemote, resolveConflictForceLocal, save } from '../store.js';
 import { newText, slugify, uniqueId, todayISO, TYPES, childIndex, fold } from '../model.js';
 import { lookupPanel, lookupEnabled } from './lookup-ui.js';
+import { rowPicker } from './row-picker.js';
 import { findChapters, alreadyHave } from '../lookup.js';
 
 /**
@@ -48,95 +49,191 @@ function addText(partial) {
  * longer than two fields it will not happen at the moment of capture.
  */
 export function quickLog(ctx) {
-  const title = h('input', { type: 'text', required: true, placeholder: 'Title', 'aria-label': 'Title' });
-  const author = h('input', { type: 'text', placeholder: 'Author (optional)', 'aria-label': 'Author' });
-  const type = h('select', { 'aria-label': 'Type' }, TYPES.map(x => h('option', { value: x }, x)));
-  type.value = 'article';
+  const texts = (state.doc && state.doc.texts) || [];
 
-  // Whatever the lookup knows beyond the visible fields. Kept off-screen
-  // rather than adding fields: §5.3's argument is that this screen has to stay
-  // a two-field operation or the capture will not happen at all.
+  const title = h('input', { type: 'text', required: true, placeholder: 'Title', 'aria-label': 'Title' });
+  const authors = h('textarea', { rows: 2, placeholder: 'One per line' });
+  const year = h('input', { type: 'number', min: 0, max: 3000 });
+  const type = h('select', TYPES.map(x => h('option', { value: x }, x)));
+  type.value = 'article';
+  const journal = h('input', { type: 'text', placeholder: 'e.g. Nous' });
+  const container = h('input', { type: 'text', placeholder: 'e.g. Critique of Pure Reason' });
+  const pages = h('input', { type: 'number', min: 0 });
+  const estHours = h('input', { type: 'number', min: 0, step: 0.25 });
+  const familiarity = h('select',
+    [['', '—'], ['0', '0 unfamiliar'], ['1', '1 some'], ['2', '2 good'], ['3', '3 expert']]
+      .map(([v, l]) => h('option', { value: v }, l)));
+  const verdict = h('textarea', { rows: 2, placeholder: 'What it turned out to be worth, in a line.' });
+
+  const flagBoxes = {
+    notes_written: h('input', { type: 'checkbox' }),
+    carded: h('input', { type: 'checkbox' }),
+    reread_wanted: h('input', { type: 'checkbox' }),
+  };
+
+  // Both on by default, because the common case is logging something the
+  // moment you finish it. Unticking is for the other case — reconstructing a
+  // read from memory, where inventing a date would be worse than leaving it
+  // blank. A null date is an ordinary state here, not a gap to be filled.
+  const startedBox = h('input', { type: 'checkbox', checked: true });
+  const finishedBox = h('input', { type: 'checkbox', checked: true });
+
+  let assessment = null;
+  const markBtns = h('div.actions');
+  const paintMarks = () => {
+    mount(markBtns,
+      h(`button${assessment === 'good' ? '.primary' : ''}`, {
+        type: 'button', onclick: () => { assessment = assessment === 'good' ? null : 'good'; paintMarks(); },
+      }, 'Good'),
+      h(`button${assessment === 'bad' ? '.primary' : ''}`, {
+        type: 'button', onclick: () => { assessment = assessment === 'bad' ? null : 'bad'; paintMarks(); },
+      }, 'Bad'),
+      h('span.spacer'),
+      h('span.hint.dim', assessment ? 'Click again to clear.' : 'Unmarked — not evaluated.'));
+  };
+  paintMarks();
+
+  let parentId = null;
+  const picker = rowPicker({
+    texts, value: null, banned: new Set(),
+    placeholder: 'Type to find a parent…',
+    onChange: (id) => { parentId = id || null; },
+  });
+
   let extra = {};
   const captured = h('p.hint.dim');
-  // The field is singular, and philosophers write themselves surname-first, so
-  // typed text is never split on commas — "Lewis, David" is one person. Only a
-  // picked record has a real author list, and only while the box still holds it
-  // verbatim.
-  let picked = null;
-
-  const panel = lookupPanel((c) => {
-    title.value = c.title || title.value;
-    if (c.authors && c.authors.length) {
-      author.value = c.authors.join(', ');
-      picked = { text: author.value, authors: c.authors };
-    }
-    if (c.type) type.value = c.type;
-    extra = {};
-    for (const k of ['year', 'pages', 'doi', 'isbn', 'journal', 'container']) {
-      if (c[k] != null) extra[k] = c[k];
-    }
-    // Say what came along invisibly, or the row silently gains fields the
-    // reader never saw and cannot check.
-    const bits = [
-      c.year, c.pages ? `${c.pages} pp` : null,
-      c.journal || c.container, c.doi ? 'DOI' : (c.isbn ? 'ISBN' : null),
-    ].filter(Boolean);
-    captured.textContent = bits.length ? `Also captured: ${bits.join(' · ')}.` : '';
-    title.focus();
-  }, {
-    authorHint: () => (author.value.split(',')[0] || '').trim(),
-    placeholder: 'Optional — DOI, ISBN, JSTOR link, or title…',
-  });
+  // The field is singular in spirit even as a list, and philosophers write
+  // themselves surname-first, so typed text is split on newlines, never commas.
+  const panel = lookupEnabled()
+    ? lookupPanel((c) => {
+      if (c.title) title.value = c.title;
+      if (c.authors && c.authors.length) authors.value = c.authors.join('\n');
+      if (c.year) year.value = c.year;
+      if (c.type) type.value = c.type;
+      if (c.journal) journal.value = c.journal;
+      if (c.container) container.value = c.container;
+      if (c.pages) pages.value = c.pages;
+      extra = {};
+      if (c.doi) extra.doi = c.doi;
+      if (c.isbn) extra.isbn = c.isbn;
+      captured.textContent = c.doi ? `DOI ${c.doi} captured.` : (c.isbn ? `ISBN ${c.isbn} captured.` : '');
+      title.focus();
+    }, {
+      authorHint: () => (authors.value.split('\n')[0] || '').trim(),
+      placeholder: 'DOI, ISBN, JSTOR link, or title…',
+    })
+    : h('p.hint', 'Metadata lookup is switched off in Settings.');
 
   const submit = () => {
     const v = title.value.trim();
     if (!v) { title.focus(); return; }
-    const { container, ...rest } = extra;
-    const typed = author.value.trim();
-    const authors = picked && picked.text === author.value
-      ? picked.authors
-      : (typed ? [typed] : []);
     const row = addText({
       title: v,
-      authors,
+      authors: authors.value.split('\n').map(x => x.trim()).filter(Boolean),
+      year: year.value === '' ? null : Number(year.value),
       type: type.value,
-      container: container || null,
+      parent_id: parentId,
+      // A linked parent wins over the free-text one, so never store both.
+      container: parentId ? null : (container.value.trim() || null),
       status: 'read',
       source: 'off-list',
       date_added: todayISO(),
-      date_finished: todayISO(),
+      date_started: startedBox.checked ? todayISO() : null,
+      date_finished: finishedBox.checked ? todayISO() : null,
       source_notes: 'quick-log',
-      extra: rest,
+      extra: {
+        ...extra,
+        ...(journal.value.trim() ? { journal: journal.value.trim() } : {}),
+        ...(pages.value === '' ? {} : { pages: Number(pages.value) }),
+        ...(estHours.value === '' ? {} : { est_hours: Number(estHours.value) }),
+        ...(familiarity.value === '' ? {} : { familiarity: Number(familiarity.value) }),
+        ...(verdict.value.trim() ? { verdict: verdict.value.trim() } : {}),
+        // Sparse: a flag goes in only when it is true. Absent is not false.
+        ...Object.fromEntries(Object.entries(flagBoxes)
+          .filter(([, box]) => box.checked).map(([k]) => [k, true])),
+        ...(assessment ? { assessment } : {}),
+      },
     });
     dlg.destroy();
     ctx.go(`#/text/${encodeURIComponent(row.id)}`);
   };
 
-  const form = h('form', { onsubmit: e => { e.preventDefault(); submit(); } },
+  const form = h('form.quicklog', { onsubmit: e => { e.preventDefault(); submit(); } },
     h('h2', 'Log something you read'),
-    h('p.hint', 'Title, author, type. Everything else can be filled in later — or never.'),
-    h('div.fields',
-      h('div.field.wide', title),
-      h('div.field.wide', author),
-      h('div.field.wide', type)),
-    captured,
-    h('details.quicklog-lookup',
-      h('summary.small', 'Look it up instead'),
-      h('p.hint', 'Fills the two fields and quietly carries the year, length and identifiers '
-        + 'with them. Skip it — a logged row with a bare title beats one you did not log.'),
-      panel),
+    h('p.hint', 'Only the title is required — type it and press Enter. Everything below is '
+      + 'optional, and anything left blank can be filled in later, or never.'),
+
+    h('section.card',
+      h('h2', 'Look it up'),
+      panel,
+      captured),
+
+    qlSection('Bibliographic', [
+      qlField('Title', title),
+      qlField('Authors', authors),
+      qlField('Year', year),
+      qlField('Type', type),
+      qlField('Journal or publication', journal, 'Where it appeared. Never used for nesting.'),
+    ]),
+
+    h('section.card',
+      h('h2', 'Parent'),
+      h('div.field.wide', h('label', 'Nest this under'), picker,
+        h('p.hint', 'Start typing a title.')),
+      h('div.field.wide', h('label', { for: 'ql-container' }, 'Parent title, not linked'),
+        Object.assign(container, { id: 'ql-container' }),
+        h('p.hint', 'Only for a parent with no record of its own. Ignored if you picked one above.'))),
+
+    qlSection('Effort', [
+      qlField('Pages', pages),
+      qlField('Estimated hours', estHours),
+      qlField('Familiarity', familiarity, 'Prior familiarity when you started — a rubric input, not an outcome.'),
+    ]),
+
+    h('section.card',
+      h('h2', 'Was it worth the hours?'),
+      markBtns,
+      h('div.fields', h('div.field.wide',
+        h('label', { for: 'ql-verdict' }, 'Verdict'),
+        Object.assign(verdict, { id: 'ql-verdict' }),
+        h('p.hint', 'Good means you would have regretted missing it, not that you enjoyed it.'))),
+      h('div.field.wide', h('label', 'Flags'),
+        h('div.checks',
+          h('label.check', flagBoxes.notes_written, h('span', 'Notes written')),
+          h('label.check', flagBoxes.carded, h('span', 'Carded')),
+          h('label.check', flagBoxes.reread_wanted, h('span', 'Reread wanted'))))),
+
+    h('section.card',
+      h('h2', 'Dates'),
+      h('div.quicklog-dates',
+        h('label.check', startedBox, h('span', 'Started today')),
+        h('label.check', finishedBox, h('span', 'Finished today'))),
+      h('p.hint', 'Untick either when you are reconstructing an old read. A blank date is an '
+        + 'ordinary state, not a gap — 214 rows already have one.')),
+
     h('p.hint', 'Saved as ', h('code', 'read'), ' / ', h('code', 'off-list'),
       ' — reading the model never ranked, which makes it the most useful calibration data you have.'),
     h('div.actions',
       h('button.primary', { type: 'submit' }, 'Log it'),
       h('button', { type: 'button', onclick: () => dlg.destroy() }, 'Cancel')),
   );
-  // Focus lands on `title` on its own: it is the first control in document
-  // order, and the collapsed <details> keeps the lookup box out of the way.
+
   const dlg = openDialog(form);
+  // openDialog focuses the first control, which is now the lookup box. The
+  // title is what this screen is for, so take it back.
+  title.focus();
   return dlg;
 }
 
+function qlSection(heading, children) {
+  return h('section.card', h('h2', heading), h('div.fields', children));
+}
+function qlField(label, control, hint) {
+  control.id = control.id || `ql-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`;
+  control.setAttribute('aria-label', label);
+  return h('div.field', h('label', { for: control.id }, label), control,
+    hint ? h('p.hint', hint) : null);
+}
 
 /**
  * Pull a book's table of contents from Crossref (spec §5.2).
