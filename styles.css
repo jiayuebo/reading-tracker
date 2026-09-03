@@ -813,3 +813,53 @@ button.small.linkish:hover { color: var(--bad); }
   .gf-2 { grid-column: span 2; }
   .state-rest { grid-column: span 4; }
 }
+
+/* ── phase A: mobile ─────────────────────────────────────────────── */
+
+/* A <select> sizes to its longest option and ignores its container. One
+   subject filter measured 619px, which forced a 375px phone to lay the whole
+   page out at 635 and scroll sideways. Nothing else was overflowing. */
+.controls select, .controls label.sel { max-width: 100%; min-width: 0; }
+.controls label.sel { display: flex; flex: 0 1 auto; min-width: 0; }
+.controls select { text-overflow: ellipsis; }
+
+/* Seven nav items and growing; they did not wrap, so the bar was 462px wide.
+   Wrapping fixed the overflow but cost four rows of header before any content,
+   which is worse. On a narrow screen the nav becomes its own scrolling strip:
+   one row, swipeable, the way a tab bar behaves everywhere else. */
+#nav { flex-wrap: wrap; row-gap: .15rem; }
+
+@media (max-width: 700px) {
+  .bar { gap: .5rem .75rem; padding: .45rem .75rem; }
+  .wordmark { font-size: .92rem; }
+  #nav {
+    order: 3; flex: 1 0 100%; flex-wrap: nowrap;
+    overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  #nav::-webkit-scrollbar { display: none; }
+  #nav a { flex: none; }
+  .sync { margin-left: auto; }
+}
+
+/* Dragging is a pointer gesture. On a touch screen the handles are 352 nodes
+   advertising something the device cannot do — the row picker in the detail
+   view is the route to nesting there. */
+@media (hover: none) {
+  .drag-handle { display: none; }
+  .row[draggable="true"] { padding-left: 0; }
+}
+
+/* Tap targets. The visual size is unchanged; the hit area grows into padding
+   that costs nothing on a pointer device. */
+@media (pointer: coarse) {
+  /* Padding alone did not reach 44px on the short elements — the line box is
+     only ~20px — so the hit area is set explicitly and the control centred
+     inside it. The visual size of the control itself is unchanged. */
+  #nav a { padding: .5rem .7rem; min-height: 44px; display: flex; align-items: center; }
+  .row-select { min-height: 44px; padding: 0 .35rem; align-items: center; }
+  .row-select input { width: 1.1rem; height: 1.1rem; }
+  button.mark, .mark-control button { min-height: 2.75rem; padding-inline: .7rem; }
+  .status-filter .check, .ql-checks .check, .state-checks .check { padding: .3rem 0; }
+  .row-main { padding: .35rem 0; }
+}

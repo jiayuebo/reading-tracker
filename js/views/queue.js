@@ -48,6 +48,17 @@ const DEFAULT_STATUSES = ['queued', 'reading'];
 const selected = new Set();
 
 /**
+ * Search is debounced because a keystroke costs a whole re-render.
+ *
+ * `savePrefs` bumps the revision the view is rebuilt from, so every character
+ * typed rebuilt all 410 rows — 165ms each on a desktop, and enough that a test
+ * harness typing eight characters timed out. The input keeps its own value in
+ * the DOM meanwhile, so what you see stays immediate; only the filtering waits.
+ */
+let searchTimer = null;
+const SEARCH_DEBOUNCE_MS = 160;
+
+/**
  * Which statuses are showing. Migrates the single-scope key this replaced, so a
  * saved preference from before the change still means what it used to.
  */
@@ -998,7 +1009,19 @@ function controls(prefs, statuses, doc, ctx) {
     h('input.search', {
       type: 'search', id: 'q', placeholder: 'Search title, author, parent…',
       value: f.q, 'aria-label': 'Search',
-      oninput: e => setF({ q: e.target.value }),
+      oninput: (e) => {
+        const v = e.target.value;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => setF({ q: v }), SEARCH_DEBOUNCE_MS);
+      },
+      // Enter and Escape should not wait: one means "I have finished typing",
+      // the other means "undo it now".
+      onkeydown: (e) => {
+        if (e.key !== 'Enter' && e.key !== 'Escape') return;
+        e.preventDefault();
+        clearTimeout(searchTimer);
+        setF({ q: e.key === 'Escape' ? '' : e.target.value });
+      },
     }),
     select('Sort', prefs.sort, Object.entries(SORTS), v => savePrefs({ sort: v })),
     types.length > 1
