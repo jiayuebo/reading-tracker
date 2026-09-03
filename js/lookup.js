@@ -68,6 +68,102 @@ async function getJSON(url) {
   return res.json();
 }
 
+// ── title case (Chicago) ────────────────────────────────────────────
+//
+// Catalogue records are inconsistent about case. Crossref hands back
+// "I.—COMPUTING MACHINERY AND INTELLIGENCE" from one publisher and
+// "The myth of the essential indexical" from the next, and both land in a
+// list beside titles that are already right.
+
+/**
+ * Lowercased in the middle of a title: articles, coordinating conjunctions and
+ * prepositions, which CMS 17 keeps down regardless of length. `as` and `to`
+ * are here for the same reason.
+ *
+ * CMS capitalises a preposition used adverbially — "Look Up", "Turn On" — and
+ * nothing short of parsing tells those apart from the ordinary case, so this
+ * gets those wrong. It is the one error worth accepting: it is rare in a
+ * bibliography, visible when it happens, and correctable in the box.
+ */
+const LOWER = new Set([
+  'a', 'an', 'the',
+  'and', 'but', 'or', 'nor', 'for', 'yet', 'so',
+  'as', 'at', 'by', 'down', 'from', 'in', 'into', 'like', 'near', 'of', 'off',
+  'on', 'onto', 'out', 'over', 'past', 'per', 'than', 'to', 'up', 'upon',
+  'via', 'with', 'within', 'without', 'about', 'above', 'across', 'after',
+  'against', 'along', 'among', 'around', 'before', 'behind', 'below',
+  'beneath', 'beside', 'between', 'beyond', 'during', 'except', 'inside',
+  'outside', 'since', 'through', 'throughout', 'toward', 'towards', 'under',
+  'underneath', 'until', 'versus', 'vs',
+]);
+
+/**
+ * Is this string shouting? Only then is existing case discarded.
+ *
+ * Anywhere else, existing capitals are evidence and are kept: they carry
+ * McDowell, PhD, Sinn und Bedeutung, and every acronym. Down-casing those to
+ * rebuild them would lose information no rule can put back.
+ */
+function isShouty(s) {
+  const letters = s.replace(/[^A-Za-z]/g, '');
+  if (letters.length < 8) return false;
+  const upper = (s.match(/[A-Z]/g) || []).length;
+  return !/[a-z]/.test(s) || upper / letters.length > 0.8;
+}
+
+function capFirst(w) {
+  const i = w.search(/[A-Za-zÀ-ɏ]/);
+  if (i < 0) return w;
+  return w.slice(0, i) + w[i].toUpperCase() + w.slice(i + 1);
+}
+
+/** One word, already known not to be shouting. */
+function caseWord(w, force) {
+  const bare = w.replace(/[^A-Za-z'’]/g, '').toLowerCase();
+  if (!force && LOWER.has(bare)) return w.toLowerCase();
+  // A word with capitals of its own past the first letter is a name, an
+  // acronym or a deliberate spelling. Leave it exactly as it came.
+  if (/[A-Z]/.test(w.slice(1))) return w;
+  return capFirst(w);
+}
+
+/**
+ * Chicago-style title case. First and last word always capitalised, as is
+ * anything opening a subtitle after a colon, question mark or dash.
+ */
+export function titleCase(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return raw;
+  const src = isShouty(raw) ? raw.toLowerCase() : raw;
+
+  const tokens = src.split(/(\s+)/);
+  const words = tokens.map((t, i) => ({ t, i, isWord: !/^\s*$/.test(t) }));
+  const wordIdx = words.filter(w => w.isWord).map(w => w.i);
+  const first = wordIdx[0];
+  const last = wordIdx[wordIdx.length - 1];
+
+  let openSegment = true;              // start of the title or of a subtitle
+  return words.map(({ t, i, isWord }) => {
+    if (!isWord) return t;
+    const force = openSegment || i === first || i === last;
+    // A colon, question mark, em dash or full stop ends a segment, so whatever
+    // follows is the start of a subtitle and is capitalised.
+    openSegment = /[:?!.—–]$/.test(t.trim());
+    // Split on the separators that can sit inside a token. A hyphen makes a
+    // compound and each part takes the ordinary rule — "Anti-Individualism".
+    // A dash or a slash starts a new phrase, so what follows is capitalised
+    // outright: without this, Crossref's "I.—COMPUTING MACHINERY" came back as
+    // "I.—computing Machinery".
+    const parts = t.split(/([-—–/])/);
+    return parts.map((part, j) => {
+      if (j % 2) return part;                       // the separator itself
+      const prev = parts[j - 1];
+      const opensPhrase = prev === '—' || prev === '–' || prev === '/';
+      return caseWord(part, (force && j === 0) || opensPhrase);
+    }).join('');
+  }).join('');
+}
+
 // ── mapping ─────────────────────────────────────────────────────────
 
 const CROSSREF_TYPE = {
@@ -106,8 +202,8 @@ function cleanText(s) {
  * on the Mind-body Problem and Mental Causation".
  */
 function fullTitle(titleArr, subtitleArr) {
-  const main = cleanText((titleArr || [])[0]);
-  const sub = cleanText((subtitleArr || [])[0]);
+  const main = titleCase(cleanText((titleArr || [])[0]));
+  const sub = titleCase(cleanText((subtitleArr || [])[0]));
   if (!sub) return main;
   if (!main) return sub;
   if (fold(main).includes(fold(sub))) return main;   // some records repeat it
@@ -127,7 +223,11 @@ function fromCrossref(w) {
     .filter(Boolean);
   const parts = w.issued && w.issued['date-parts'] && w.issued['date-parts'][0];
   const type = CROSSREF_TYPE[w.type] || 'article';
-  const containerTitle = cleanText((w['container-title'] && w['container-title'][0]) || '') || null;
+  // The container of a chapter is a book title, so it gets the same treatment.
+  // The journal name does not: those arrive correct and are full of house
+  // styling — "Noûs", "Mind & Language" — that a rule can only damage.
+  const rawContainer = cleanText((w['container-title'] && w['container-title'][0]) || '') || null;
+  const containerTitle = rawContainer;
 
   // Three cases, not two. For a chapter it is the book (a real parent); for an
   // article it is the journal; for a whole book it is a series or a hosting
@@ -140,7 +240,7 @@ function fromCrossref(w) {
     authors,
     year: parts && parts[0] ? Number(parts[0]) : null,
     type,
-    container: isPartOfBook ? containerTitle : null,
+    container: isPartOfBook ? titleCase(containerTitle) : null,
     journal: type === 'article' ? containerTitle : null,
     pages: pageCount(w.page),
     doi: w.DOI || null,
