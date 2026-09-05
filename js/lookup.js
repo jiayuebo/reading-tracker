@@ -118,13 +118,46 @@ function capFirst(w) {
 }
 
 /** One word, already known not to be shouting. */
-function caseWord(w, force) {
-  const bare = w.replace(/[^A-Za-z'’]/g, '').toLowerCase();
-  if (!force && LOWER.has(bare)) return w.toLowerCase();
+function caseWord(w, force, foreign) {
+  const bare = w.replace(/[^\p{L}'’]/gu, '').toLowerCase();
+  if (!force && (LOWER.has(bare) || (foreign && FOREIGN.has(bare)))) return w.toLowerCase();
   // A word with capitals of its own past the first letter is a name, an
   // acronym or a deliberate spelling. Leave it exactly as it came.
-  if (/[A-Z]/.test(w.slice(1))) return w;
+  if (/\p{Lu}/u.test(w.slice(1))) return w;
   return capFirst(w);
+}
+
+/**
+ * Function words in the languages a philosophy bibliography actually contains.
+ *
+ * Used only to decide whether a title is already cased, never to case one. A
+ * German or French title left lowercase in the middle — "Sinn und Bedeutung" —
+ * would otherwise read as un-cased and get rewritten, which is exactly the
+ * damage the check exists to prevent.
+ */
+const FOREIGN = new Set([
+  'und', 'oder', 'der', 'die', 'das', 'des', 'dem', 'den', 'von', 'vom', 'zur',
+  'zum', 'im', 'ein', 'eine', 'als', 'bei', 'aus', 'auf', 'mit', 'nach',
+  'de', 'du', 'des', 'la', 'le', 'les', 'et', 'ou', 'aux', 'sur', 'dans',
+  'el', 'los', 'las', 'y', 'en', 'il', 'lo', 'dei', 'della', 'delle', 'e',
+  'och', 'og', 'ad', 'in', 'sive', 'seu',
+]);
+
+/** Is every word outside the stop lists already capitalised? */
+function looksCased(s) {
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return !/^\p{Ll}/u.test(words[0] || '');
+  const major = words.filter((w, i) => {
+    const bare = w.replace(/[^\p{L}'’]/gu, '').toLowerCase();
+    return bare && (i === 0 || (!LOWER.has(bare) && !FOREIGN.has(bare)));
+  });
+  if (!major.length) return false;
+  // Unicode-aware: an ASCII-only test reads the U-umlaut in "Über" as a
+  // non-letter, finds the "b" instead, and calls the word lowercase.
+  return major.every(w => {
+    const m = w.match(/\p{L}/u);
+    return m ? /\p{Lu}/u.test(m[0]) : true;
+  });
 }
 
 /**
@@ -134,7 +167,22 @@ function caseWord(w, force) {
 export function titleCase(input) {
   const raw = String(input || '').trim();
   if (!raw) return raw;
-  const src = isShouty(raw) ? raw.toLowerCase() : raw;
+  const shouty = isShouty(raw);
+  // Already cased by someone who knew the work: leave it exactly alone.
+  //
+  // The stop list is English, and applying it to a title that is not English
+  // corrupts it — "Sinn und Bedeutung" came back as "Sinn Und Bedeutung". It
+  // also cannot tell a preposition from a word that merely looks like one, so
+  // Nagel's "What Is It Like to Be a Bat?" lost its capital L. Both are the
+  // same mistake: rewriting a title that had nothing wrong with it. A record
+  // where every word outside the stop list is already capitalised is evidence
+  // of a deliberate hand, and evidence beats a rule.
+  if (!shouty && looksCased(raw)) return raw;
+  const src = shouty ? raw.toLowerCase() : raw;
+  // A diacritic is the cheapest evidence available that the title is not
+  // English, and only then are non-English function words kept down. Inferring
+  // that from an all-ASCII title would lowercase the verb in "Learning to Die".
+  const foreign = /[^\u0000-\u007F]/.test(raw.replace(/[’‘“”—–…§]/g, ''));
 
   const tokens = src.split(/(\s+)/);
   const words = tokens.map((t, i) => ({ t, i, isWord: !/^\s*$/.test(t) }));
@@ -159,7 +207,7 @@ export function titleCase(input) {
       if (j % 2) return part;                       // the separator itself
       const prev = parts[j - 1];
       const opensPhrase = prev === '—' || prev === '–' || prev === '/';
-      return caseWord(part, (force && j === 0) || opensPhrase);
+      return caseWord(part, (force && j === 0) || opensPhrase, foreign);
     }).join('');
   }).join('');
 }
