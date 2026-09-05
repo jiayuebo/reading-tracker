@@ -13,6 +13,7 @@ import { renderPool } from './views/pool.js';
 import { renderEvaluate } from './views/evaluate.js';
 import { renderSubjects, renderSubjectDetail } from './views/subjects.js';
 import { renderProjects, renderProjectDetail } from './views/projects.js';
+import { renderVerdicts } from './views/verdicts.js';
 import { renderDetail } from './views/detail.js';
 import { renderSettings } from './views/settings.js';
 import { quickLog, newTextDialog, conflictDialog, helpDialog } from './views/dialogs.js';
@@ -99,6 +100,7 @@ function render() {
       else if (r.name === 'evaluate') renderEvaluate(view, ctx);
       else if (r.name === 'subjects') renderSubjects(view, ctx);
       else if (r.name === 'subject' && r.arg) renderSubjectDetail(view, ctx, r.arg);
+      else if (r.name === 'verdicts') renderVerdicts(view, ctx);
       else if (r.name === 'projects') renderProjects(view, ctx);
       else if (r.name === 'project' && r.arg) renderProjectDetail(view, ctx, r.arg);
       else if (r.name === 'text' && r.arg) renderDetail(view, ctx, r.arg);
@@ -162,6 +164,7 @@ function renderNav(r) {
       ? navLink('#/triage', triageCount ? `Triage ${triageCount}` : 'Triage', r.name === 'triage')
       : null,
     navLink('#/log', 'Log', r.name === 'log'),
+    navLink('#/verdicts', 'Verdicts', r.name === 'verdicts'),
     navLink('#/backfill', 'Backfill', r.name === 'backfill'),
     navLink('#/subjects', 'Subjects', r.name === 'subjects' || r.name === 'subject'),
     navLink('#/projects', 'Projects', r.name === 'projects' || r.name === 'project'),
@@ -286,7 +289,7 @@ function keys(e) {
 
   if (pendingG) {
     pendingG = false;
-    const map = { q: '#/queue', t: '#/triage', s: '#/settings', b: '#/backfill', p: '#/pool', e: '#/evaluate', u: '#/subjects', l: '#/log', r: '#/projects' };
+    const map = { q: '#/queue', t: '#/triage', s: '#/settings', b: '#/backfill', p: '#/pool', e: '#/evaluate', u: '#/subjects', l: '#/log', r: '#/projects', v: '#/verdicts' };
     if (map[e.key]) { e.preventDefault(); location.hash = map[e.key]; }
     return;
   }
