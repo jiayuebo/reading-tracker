@@ -31,9 +31,23 @@ import { rereadDialog } from './dialogs.js';
 const STATUS_FILTERS = [
   ['queued', 'Queued'],
   ['reading', 'Reading'],
+  // Not a status, but it behaves like one here: ticking it ADDS flagged texts
+  // to the list rather than narrowing the others. As a narrowing filter it
+  // showed almost nothing unless Read was also ticked, which put all three
+  // hundred read rows in the way of the sixteen that mattered. Sits between
+  // Reading and Read because that is where it falls in practice — the texts
+  // you intend to be in, but are not yet.
+  ['reread', 'Reread wanted'],
   ['read', 'Read'],
   ['abandoned', 'Abandoned'],
 ];
+
+const FILTER_LABEL = Object.fromEntries(STATUS_FILTERS);
+
+/** A flagged text counts under the reread box whatever its status, bar triage. */
+function wantsReread(t) {
+  return !!t.reread_wanted && t.status !== 'triage';
+}
 
 const DEFAULT_STATUSES = ['queued', 'reading'];
 
@@ -64,6 +78,9 @@ const SEARCH_DEBOUNCE_MS = 160;
  * saved preference from before the change still means what it used to.
  */
 function statusesOf(f) {
+  // The old narrowing checkbox meant "only flagged texts"; its nearest
+  // equivalent in the union is the reread box on its own.
+  if (f.rereadOnly) return ['reread'];
   if (Array.isArray(f.statuses)) return f.statuses;
   const legacy = {
     active: ['queued', 'reading'], queued: ['queued'], reading: ['reading'],
@@ -90,7 +107,7 @@ export function renderQueue(root, ctx) {
   const byId = byIdIndex(texts);
 
   const statuses = statusesOf(f);
-  const inScope = t => statuses.includes(t.status);
+  const inScope = t => statuses.includes(t.status) || (statuses.includes('reread') && wantsReread(t));
   const visible = texts.filter(inScope).filter(t => matches(t, f, byId));
   const ordered = sortRows(visible, prefs);
 
@@ -99,7 +116,7 @@ export function renderQueue(root, ctx) {
   const readingCount = texts.filter(t => t.status === 'reading').length;
   const triageCount = texts.filter(t => t.status === 'triage').length;
   const inScopeTotal = texts.filter(inScope).length;
-  const showsFinished = statuses.includes('read') || statuses.includes('abandoned');
+  const showsFinished = statuses.includes('read') || statuses.includes('abandoned') || statuses.includes('reread');
 
   // Prune first: `ordered` is exactly what is on screen.
   const visibleIds = new Set(ordered.map(t => t.id));
@@ -121,7 +138,7 @@ export function renderQueue(root, ctx) {
       h('h1', 'Queue'),
       h('p.counts',
         statuses.length
-          ? `${leafCount} of ${inScopeTotal} ${statuses.join(', ')}`
+          ? `${leafCount} of ${inScopeTotal} ${statuses.map(k => (FILTER_LABEL[k] || k).toLowerCase()).join(', ')}`
           : 'no statuses selected',
         groupCount ? ` · ${groupCount} grouped under a parent` : null,
         triageCount ? [' · ', h('a', { href: '#/triage' }, `${triageCount} in triage`)] : null,
@@ -465,7 +482,6 @@ function selectionBar(ordered, picked, byId, children, texts, doc, ctx) {
 function matches(t, f, byId) {
   // A restriction, not part of the status union: it narrows whatever statuses
   // are showing rather than adding to them.
-  if (f.rereadOnly && !t.reread_wanted) return false;
   if (f.type && t.type !== f.type) return false;
   if (f.project && !(t.project_ids || []).includes(f.project)) return false;
   if (f.subject && !(t.subject_ids || []).includes(f.subject)) return false;
@@ -1002,13 +1018,13 @@ function controls(prefs, statuses, doc, ctx) {
     const next = on
       ? [...new Set([...statuses, key])]
       : statuses.filter(x => x !== key);
-    setF({ statuses: next, status: undefined });
+    setF({ statuses: next, status: undefined, rereadOnly: undefined });
   };
 
   const statusBoxes = h('fieldset.status-filter',
     h('legend.sr-only', 'Statuses to show'),
     STATUS_FILTERS.map(([key, label]) => {
-      const n = texts.filter(t => t.status === key).length;
+      const n = key === 'reread' ? texts.filter(wantsReread).length : texts.filter(t => t.status === key).length;
       return h('label.check',
         h('input', {
           type: 'checkbox', checked: statuses.includes(key),
@@ -1055,17 +1071,7 @@ function controls(prefs, statuses, doc, ctx) {
         onchange: e => savePrefs({ group: e.target.checked }),
       }),
       h('span', 'Nest under parents')),
-    (() => {
-      const n = texts.filter(t => t.reread_wanted).length;
-      return h('label.check', { title: 'Only texts flagged as worth returning to' },
-        h('input', {
-          type: 'checkbox', checked: !!f.rereadOnly,
-          onchange: e => setF({ rereadOnly: e.target.checked }),
-        }),
-        h('span', 'Reread wanted'),
-        h('span.dim.tabular', ` ${n}`));
-    })(),
-    (f.q || f.type || f.project || f.subject || f.familiarity !== '' || f.rereadOnly)
+    (f.q || f.type || f.project || f.subject || f.familiarity !== '')
       ? h('button.link', {
         onclick: () => setF({ q: '', type: '', project: '', subject: '', familiarity: '', rereadOnly: false }),
       }, 'Clear filters')
@@ -1124,7 +1130,7 @@ function emptyState(f, statuses, total, ctx) {
         onclick: () => savePrefs({ filters: { ...f, statuses: DEFAULT_STATUSES } }),
       }, 'Show queued and reading'));
   }
-  const filtering = f.q || f.type || f.project || f.subject || f.familiarity !== '' || f.rereadOnly;
+  const filtering = f.q || f.type || f.project || f.subject || f.familiarity !== '';
   if (filtering && total) {
     return h('div.empty',
       h('p', `Nothing matches. ${total} ${statuses.join(' / ')} texts are hidden by the current filters.`),
