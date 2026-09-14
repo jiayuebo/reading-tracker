@@ -87,11 +87,31 @@ export async function checkRepo({ owner, repo, token }) {
   }
 }
 
-/** @returns {{text: string, sha: string, size: number}} */
-export async function getFile({ owner, repo, path, token }) {
+/**
+ * Read a file of up to 100 MB.
+ *
+ * The Contents API only returns content inline for files of 1 MB or less, and
+ * between 1 and 100 MB it refuses the default media type outright. data.json
+ * was 669 KB at 422 rows and growing about 1.6 KB a row, so it crosses that
+ * line at roughly 630 rows.
+ *
+ * So the request asks for the `object` media type, which answers at every size
+ * up to 100 MB: with content inline when the file is small, and with metadata
+ * and an empty content field when it is not. In the second case the content
+ * comes from the Blobs API by the sha the first response supplied. Both paths
+ * return the same base64 and go through the same UTF-8 decoder.
+ *
+ * `viaBlob` forces the second path, so it can be checked against the first on a
+ * file small enough to read both ways.
+ *
+ * @returns {{text: string, sha: string, size: number, via: 'contents' | 'blob'}}
+ */
+export async function getFile({ owner, repo, path, token, viaBlob = false }) {
   let r;
   try {
-    r = await request(`${API}/repos/${owner}/${repo}/contents/${path}`, token);
+    r = await request(`${API}/repos/${owner}/${repo}/contents/${path}`, token, {
+      headers: { Accept: 'application/vnd.github.object+json' },
+    });
   } catch (e) {
     if (e.kind === 'missing') {
       // Distinguish "no such file" from "token cannot see this repo at all".
@@ -100,18 +120,37 @@ export async function getFile({ owner, repo, path, token }) {
     }
     throw e;
   }
-  if (Array.isArray(r)) throw new GitHubError('unknown', `${path} is a directory, not a file.`);
-  if (r.encoding !== 'base64' || typeof r.content !== 'string') {
-    throw new GitHubError('toolarge',
-      'GitHub did not return file content inline. Files over 1 MB need the Blobs API.', { detail: r.encoding });
+  // The object media type wraps a directory listing as { entries: [...] }.
+  if (Array.isArray(r) || Array.isArray(r.entries) || r.type === 'dir') {
+    throw new GitHubError('unknown', `${path} is a directory, not a file.`);
   }
+
+  let b64 = null;
+  let via = 'contents';
+  const inline = r.encoding === 'base64' && typeof r.content === 'string' && (r.content !== '' || !r.size);
+  if (inline && !viaBlob) {
+    b64 = r.content;
+  } else {
+    if (!r.sha) {
+      throw new GitHubError('unknown', 'GitHub returned no content and no sha for the file.', { detail: r.encoding });
+    }
+    const blob = await request(`${API}/repos/${owner}/${repo}/git/blobs/${r.sha}`, token);
+    if (blob.encoding !== 'base64' || typeof blob.content !== 'string') {
+      throw new GitHubError('toolarge',
+        'GitHub would not return the file even through the Blobs API, which stops at 100 MB.',
+        { detail: `${blob.encoding}, ${r.size} bytes` });
+    }
+    b64 = blob.content;
+    via = 'blob';
+  }
+
   let text;
   try {
-    text = base64ToUtf8(r.content);
+    text = base64ToUtf8(b64);
   } catch (e) {
     throw new GitHubError('unknown', 'File content is not valid UTF-8 and was not decoded.', { detail: String(e) });
   }
-  return { text, sha: r.sha, size: r.size };
+  return { text, sha: r.sha, size: r.size, via };
 }
 
 /** @returns {{sha: string, commit: string}} */
