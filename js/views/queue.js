@@ -22,6 +22,7 @@ import {
   poolEligible, inPool,
 } from '../model.js';
 import { rowPicker } from './row-picker.js';
+import { rereadDialog } from './dialogs.js';
 
 // Checkboxes, unioned — not a dropdown of preset combinations. A dropdown made
 // "queued" and "queued + reading" look like two unrelated modes when one is a
@@ -894,7 +895,20 @@ function rowActions(t, ctx) {
         },
       }, 'Finish'));
   }
-  return markControl(t);
+  const marks = markControl(t);
+  // Only on rows already flagged for a reread, so the button appears where it
+  // is the expected next move rather than on all 300 read rows.
+  if ((t.status === 'read' || t.status === 'abandoned') && t.reread_wanted) {
+    return h('span.mark-control', marks,
+      h('button.mark.act', {
+        type: 'button', title: 'Log a reread of this text',
+        onclick: (e) => { e.preventDefault(); e.stopPropagation(); rereadDialog(t, ctx); },
+      // Not "Reread": finished rows already carry a Reread toggle for the
+      // reread_wanted flag, and two buttons with one label doing different
+      // things is exactly the confusion to avoid.
+      }, 'Log reread'));
+  }
+  return marks;
 }
 
 /**

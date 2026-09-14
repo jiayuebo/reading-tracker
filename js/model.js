@@ -14,6 +14,17 @@ export const TYPES = ['book', 'chapter', 'article', 'section'];
 export const STATUSES = ['queued', 'reading', 'read', 'abandoned', 'triage'];
 export const SOURCES = ['queue', 'off-list', 'coursework'];
 
+/**
+ * Why a text was reread (spec §4.5). The first two are the cases the spec
+ * names as the reasons a reread cannot be priced, and the only place the
+ * schema preserves which one it was.
+ */
+export const REREAD_KINDS = [
+  ['terrain', 'The terrain has changed'],
+  ['canonical', 'Canonical return'],
+  ['other', 'Other'],
+];
+
 export const STATUS_LABEL = {
   queued: 'Queued', reading: 'Reading', read: 'Read',
   abandoned: 'Abandoned', triage: 'Triage',

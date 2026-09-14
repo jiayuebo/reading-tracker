@@ -9,7 +9,7 @@
 
 import { h, mount } from '../dom.js';
 import { state } from '../store.js';
-import { authorLine, sortKeyTitle, STATUS_LABEL, childIndex } from '../model.js';
+import { authorLine, sortKeyTitle, STATUS_LABEL, childIndex, REREAD_KINDS } from '../model.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -19,6 +19,7 @@ const SOURCE_LABEL = {
   queue: 'From the queue',
   'off-list': 'Off-list',
   coursework: 'Coursework',
+  reread: 'Reread',
 };
 
 /** Inclusive list of YYYY-MM between two dates, gaps included. */
@@ -115,6 +116,15 @@ function svg(tag, attrs, ...kids) {
   return el;
 }
 
+/**
+ * Which reading the log shows. Rereads are separable because they answer a
+ * different question: new reads measure how the corpus grows, rereads measure
+ * where time went back. Mixed without a way apart, a month of rereading would
+ * look like a month of discovery.
+ */
+let lens = 'both';
+const LENSES = [['both', 'Everything'], ['new', 'New reads'], ['rereads', 'Rereads']];
+
 export function renderLog(root, ctx) {
   const texts = (state.doc && state.doc.texts) || [];
   const finished = texts.filter(t => t.status === 'read' || t.status === 'abandoned');
@@ -124,18 +134,9 @@ export function renderLog(root, ctx) {
    * Finishing a book by finishing its chapters logs both, and counting both
    * says you read the thing twice.
    *
-   * Two different corrections, because the two numbers mean different things.
-   *
-   * A work is counted at the outermost dated row: read Language, Thought and
-   * Other Biological Categories chapter by chapter and also mark the book
-   * finished, and that is one book read, not one book and seven chapters.
-   *
-   * Pages net out instead of collapsing, so each month keeps the share it
-   * earned. A row contributes its own page count minus the pages of its dated
-   * descendants — the chapters land in the months you read them, the book
-   * contributes only the remainder, and the total is the book. It also works
-   * the other way round: a book with no page count of its own contributes
-   * nothing and its chapters still count, which collapsing would have lost.
+   * A work is counted at the outermost dated row. Pages net out instead of
+   * collapsing, so each month keeps the share it earned: a row contributes its
+   * own page count minus the pages of its dated descendants.
    */
   const kids = childIndex(texts);
   const byId = new Map(texts.map(t => [t.id, t]));
@@ -161,7 +162,23 @@ export function renderLog(root, ctx) {
   const undated = finished.filter(t => !t.date_finished);
   const reading = texts.filter(t => t.status === 'reading');
 
-  if (!finished.length) {
+  // Rereads are events on a row (§4.5). They never change status, so they
+  // never reach the queue or the priority sort; here they are only counted.
+  const rereads = [];
+  for (const t of texts) {
+    for (const e of t.reread_log || []) if (e && e.date) rereads.push({ t, e });
+  }
+
+  const showNew = lens !== 'rereads';
+  const showRe = lens !== 'new';
+
+  const lensBar = h('div.lens', { role: 'group', 'aria-label': 'Which reading to show' },
+    LENSES.map(([k, label]) => h(`button.small${lens === k ? '.primary' : ''}`, {
+      type: 'button', 'aria-pressed': lens === k ? 'true' : 'false',
+      onclick: () => { lens = k; ctx.rerender(); },
+    }, k === 'rereads' && rereads.length ? `${label} ${rereads.length}` : label)));
+
+  if (!finished.length && !rereads.length) {
     mount(root,
       h('header.view-head', h('h1', 'Log')),
       h('div.empty', h('p', 'Nothing is finished yet. This fills up as you mark things read.')));
@@ -169,35 +186,54 @@ export function renderLog(root, ctx) {
   }
 
   const byMonth = new Map();
-  for (const t of dated) {
-    const k = t.date_finished.slice(0, 7);
-    if (!byMonth.has(k)) byMonth.set(k, []);
-    byMonth.get(k).push(t);
-  }
-  const monthKeys = dated.length
-    ? monthSpan([...byMonth.keys()].sort()[0], [...byMonth.keys()].sort().at(-1))
-    : [];
+  const slot = (k) => {
+    if (!byMonth.has(k)) byMonth.set(k, { reads: [], rereads: [] });
+    return byMonth.get(k);
+  };
+  if (showNew) for (const t of dated) slot(t.date_finished.slice(0, 7)).reads.push(t);
+  if (showRe) for (const r of rereads) slot(r.e.date.slice(0, 7)).rereads.push(r);
+  const sortedKeys = [...byMonth.keys()].sort();
+  const monthKeys = sortedKeys.length ? monthSpan(sortedKeys[0], sortedKeys.at(-1)) : [];
 
+  const stackKeys = [...(showNew ? SOURCE_ORDER : []), ...(showRe ? ['reread'] : [])];
   const counts = {};
   const pages = {};
-  for (const key of SOURCE_ORDER) { counts[key] = {}; pages[key] = {}; }
+  for (const key of stackKeys) { counts[key] = {}; pages[key] = {}; }
   const srcOf = t => (SOURCE_ORDER.includes(t.source) ? t.source : 'queue');
-  for (const t of works) {
-    const k = t.date_finished.slice(0, 7);
-    counts[srcOf(t)][k] = (counts[srcOf(t)][k] || 0) + 1;
+  if (showNew) {
+    for (const t of works) {
+      const k = t.date_finished.slice(0, 7);
+      counts[srcOf(t)][k] = (counts[srcOf(t)][k] || 0) + 1;
+    }
+    for (const t of dated) {
+      const n = netPages(t);
+      if (!n) continue;
+      const k = t.date_finished.slice(0, 7);
+      pages[srcOf(t)][k] = (pages[srcOf(t)][k] || 0) + n;
+    }
   }
-  for (const t of dated) {
-    const n = netPages(t);
-    if (!n) continue;
-    const k = t.date_finished.slice(0, 7);
-    pages[srcOf(t)][k] = (pages[srcOf(t)][k] || 0) + n;
+  if (showRe) {
+    for (const { t, e } of rereads) {
+      const k = e.date.slice(0, 7);
+      counts.reread[k] = (counts.reread[k] || 0) + 1;
+      if (t.pages) pages.reread[k] = (pages.reread[k] || 0) + t.pages;
+    }
   }
 
-  const pagesTotal = dated.reduce((s, t) => s + netPages(t), 0);
-  const withPages = dated.filter(t => netPages(t) > 0).length;
+  const newPages = showNew ? dated.reduce((s, t) => s + netPages(t), 0) : 0;
+  const rePages = showRe ? rereads.reduce((s, r) => s + (r.t.pages || 0), 0) : 0;
+  const pagesTotal = newPages + rePages;
+  const withPages = (showNew ? dated.filter(t => netPages(t) > 0).length : 0)
+    + (showRe ? rereads.filter(r => r.t.pages).length : 0);
+  const reHours = rereads.reduce((s, r) => s + (Number(r.e.hours) || 0), 0);
+  const reTexts = new Set(rereads.map(r => r.t.id)).size;
   const good = finished.filter(t => t.assessment === 'good').length;
   const bad = finished.filter(t => t.assessment === 'bad').length;
-  const perMonth = monthKeys.length ? (works.length / monthKeys.length) : 0;
+  const events = (showNew ? works.length : 0) + (showRe ? rereads.length : 0);
+  const perMonth = monthKeys.length ? (events / monthKeys.length) : 0;
+
+  const countsTitle = lens === 'rereads' ? 'Rereads' : 'Works finished';
+  const pagesTitle = lens === 'rereads' ? 'Pages reread' : 'Pages finished';
 
   mount(root,
     h('header.view-head',
@@ -205,63 +241,79 @@ export function renderLog(root, ctx) {
       h('p.counts',
         `${finished.length} finished · ${dated.length} with a date · `,
         undated.length ? `${undated.length} without` : 'all dated',
-        rolledUp ? ` · ${rolledUp} counted under a parent` : null),
+        rolledUp ? ` · ${rolledUp} counted under a parent` : null,
+        rereads.length ? ` · ${rereads.length} reread${rereads.length === 1 ? '' : 's'}` : null),
     ),
+
+    lensBar,
 
     h('div.log-stats',
-      stat(works.length, 'works',
-        rolledUp ? `${rolledUp} chapters counted in their book` : 'nothing nested'),
-      stat(perMonth ? perMonth.toFixed(1) : '—', 'per month', 'average across the span'),
+      showNew ? stat(works.length, 'works',
+        rolledUp ? `${rolledUp} chapters counted in their book` : 'nothing nested') : null,
+      showRe ? stat(rereads.length, 'rereads',
+        rereads.length
+          ? `${reTexts} text${reTexts === 1 ? '' : 's'} · ${reHours ? `${reHours}h logged` : 'no hours logged'}`
+          : 'none logged yet') : null,
+      stat(perMonth ? perMonth.toFixed(1) : '—', 'per month',
+        lens === 'both' && rereads.length ? 'reads and rereads together' : 'average across the span'),
       stat(pagesTotal ? pagesTotal.toLocaleString() : '—', 'pages',
-        withPages ? `from ${withPages} rows that record them` : 'none recorded'),
-      stat(`${good}/${bad}`, 'good / bad', `${finished.length - good - bad} unmarked`),
+        withPages ? `from ${withPages} that record them` : 'none recorded'),
+      showNew ? stat(`${good}/${bad}`, 'good / bad', `${finished.length - good - bad} unmarked`) : null,
     ),
 
-    dated.length ? h('section.card',
-      h('div.card-head', h('h2', 'Works finished'), legend()),
+    monthKeys.length ? h('section.card',
+      h('div.card-head', h('h2', countsTitle), legend(stackKeys)),
       barChart({
-        months: monthKeys, stacks: counts, keys: SOURCE_ORDER, labelOf: monthLabel,
-        valueLabel: 'Works finished',
-        summary: `${works.length} works across ${monthKeys.length} months.`,
+        months: monthKeys, stacks: counts, keys: stackKeys, labelOf: monthLabel,
+        valueLabel: countsTitle,
+        summary: `${events} across ${monthKeys.length} months.`,
       }),
-    ) : null,
+    ) : (lens === 'rereads' ? h('div.empty',
+      h('p', 'No rereads logged yet. Use “Log a reread” on any finished text, or the Reread button '
+        + 'on rows flagged for one.')) : null),
 
     withPages ? h('section.card',
-      h('div.card-head', h('h2', 'Pages finished'), legend()),
+      h('div.card-head', h('h2', pagesTitle), legend(stackKeys)),
       barChart({
-        months: monthKeys, stacks: pages, keys: SOURCE_ORDER, labelOf: monthLabel,
-        valueLabel: 'Pages finished',
+        months: monthKeys, stacks: pages, keys: stackKeys, labelOf: monthLabel,
+        valueLabel: pagesTitle,
         summary: `${pagesTotal} pages across ${monthKeys.length} months.`,
       }),
-      h('p.hint', `Only ${withPages} of ${dated.length} dated rows contribute a page count, so `
-        + 'this is a floor, not a total. Chapters of a book you also marked finished are netted '
-        + 'out, so nothing is counted twice.'),
+      h('p.hint', `A floor, not a total: only ${withPages} contribute a page count. `
+        + (showNew ? 'Chapters of a book you also marked finished are netted out. ' : '')
+        + (showRe ? 'A reread counts the whole text’s pages.' : '')),
     ) : null,
 
-    reading.length ? h('section.card',
+    showNew && reading.length ? h('section.card',
       h('h2', `Open now — ${reading.length}`),
       h('ul.log-list', reading
         .slice().sort((a, b) => (a.date_started || '9999').localeCompare(b.date_started || '9999'))
         .map(t => logRow(t, { showOpenFor: true }))),
     ) : null,
 
-    ...[...byMonth.keys()].sort().reverse().map(k => h('section.card',
-      h('div.card-head',
-        h('h2', monthLabel(k)),
-        h('span.dim.small',
-          `${byMonth.get(k).filter(x => !subsumed(x)).length} · `
-          + `${byMonth.get(k).reduce((s, t) => s + netPages(t), 0) || '—'} pp`)),
-      h('ul.log-list', byMonth.get(k)
-        .slice().sort((a, b) => (b.date_finished || '').localeCompare(a.date_finished || '')
-          || sortKeyTitle(a).localeCompare(sortKeyTitle(b)))
-        .map(t => logRow(t))),
-    )),
+    ...[...byMonth.keys()].sort().reverse().map((k) => {
+      const m = byMonth.get(k);
+      const items = [
+        ...m.reads.map(t => ({ date: t.date_finished, node: logRow(t) })),
+        ...m.rereads.map(r => ({ date: r.e.date, node: rereadRow(r) })),
+      ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      const n = m.reads.filter(x => !subsumed(x)).length;
+      const pp = m.reads.reduce((s, t) => s + netPages(t), 0)
+        + m.rereads.reduce((s, r) => s + (r.t.pages || 0), 0);
+      const bits = [
+        showNew ? `${n} new` : null,
+        showRe && m.rereads.length ? `${m.rereads.length} reread` : null,
+        `${pp || '—'} pp`,
+      ].filter(Boolean);
+      return h('section.card',
+        h('div.card-head', h('h2', monthLabel(k)), h('span.dim.small', bits.join(' · '))),
+        h('ul.log-list', items.map(x => x.node)));
+    }),
 
-    undated.length ? h('details.card.log-undated',
+    showNew && undated.length ? h('details.card.log-undated',
       h('summary', `${undated.length} finished with no date`),
-      h('p.hint', 'Mostly the original import, which never had one. They are real reading and '
-        + 'count in the totals above; they simply cannot be placed on the chart. Add a finish '
-        + 'date on any row and it moves up into its month.'),
+      h('p.hint', 'Mostly the original import, which never had one. They count in the totals above '
+        + 'but cannot be placed on the chart. Add a finish date and a row moves into its month.'),
       h('ul.log-list', undated
         .slice().sort((a, b) => (b.date_added || '').localeCompare(a.date_added || ''))
         .map(t => logRow(t, { showAdded: true }))),
@@ -276,8 +328,8 @@ function stat(value, label, note) {
     note ? h('span.log-stat-n', note) : null);
 }
 
-function legend() {
-  return h('span.chart-legend', SOURCE_ORDER.map(k =>
+function legend(keys = SOURCE_ORDER) {
+  return h('span.chart-legend', keys.map(k =>
     h('span.legend-item', h('span', { class: `swatch bar-${k}` }), SOURCE_LABEL[k])));
 }
 
@@ -306,4 +358,19 @@ function logRow(t, { showOpenFor = false, showAdded = false } = {}) {
           : showAdded ? `added ${t.date_added || '—'}`
             : (t.date_finished || '')),
     ));
+}
+
+const REREAD_KIND_LABEL = Object.fromEntries(REREAD_KINDS);
+
+function rereadRow({ t, e }) {
+  const meta = [authorLine(t), t.year || null, t.pages ? `${t.pages} pp` : null,
+    e.hours != null ? `${e.hours}h` : null].filter(Boolean);
+  return h('li.log-item.log-reread',
+    h('div.log-main',
+      h('a', { href: `#/text/${encodeURIComponent(t.id)}` }, t.title || '(untitled)'),
+      meta.length ? h('span.meta', meta.join(' · ')) : null,
+      e.reason ? h('p.log-verdict', e.reason) : null),
+    h('div.log-side',
+      h('span.tag.reread', e.kind && e.kind !== 'other' ? `Reread · ${REREAD_KIND_LABEL[e.kind]}` : 'Reread'),
+      h('span.dim.small.tabular', e.date)));
 }

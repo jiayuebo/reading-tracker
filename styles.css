@@ -894,3 +894,18 @@ a.project-card:hover { border-color: var(--rule-2); background: var(--surface-2)
 .progress-line { font-size: .78rem; color: var(--ink-3); margin: .5rem 0 .4rem; }
 .upcoming { opacity: .8; }
 .upcoming h2 { font-size: .68rem; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); }
+
+/* ── rereads ─────────────────────────────────────────────────────── */
+
+/* Neutral on purpose: a reread is time spent, not the corpus growing, so it
+   should not borrow one of the three source hues. */
+.bar-reread { fill: var(--ink-3); }
+.swatch.bar-reread { background: var(--ink-3); }
+.tag.reread { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--rule-2); }
+.log-reread .log-main > a { font-style: italic; }
+
+.lens { display: flex; gap: .3rem; flex-wrap: wrap; margin: .2rem 0 .8rem; }
+
+.reread-list { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.reread-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+.reread-reason { margin: .2rem 0 0; font-size: .88rem; color: var(--ink-2); }

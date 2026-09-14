@@ -6,11 +6,12 @@ import { state, mutate } from '../store.js';
 import {
   TYPES, STATUSES, SOURCES, STATUS_LABEL, childIndex, byIdIndex, descendantIds,
   containerName, unreadPrerequisites, quadrant, scores, todayISO, sortKeyTitle, poolEligible, orderOf,
+  REREAD_KINDS,
 } from '../model.js';
 import { lookupPanel, lookupEnabled } from './lookup-ui.js';
 import { applyCandidate, describe } from '../lookup.js';
 import { rowPicker } from './row-picker.js';
-import { chaptersDialog } from './dialogs.js';
+import { chaptersDialog, rereadDialog } from './dialogs.js';
 
 export function renderDetail(root, ctx, id) {
   const doc = state.doc;
@@ -170,6 +171,8 @@ export function renderDetail(root, ctx, id) {
       ),
     ]),
 
+    rereadCard(t, ctx),
+
     section('Links', [
       field('Notes link', h('input', { type: 'url', value: t.notes_link || '', placeholder: 'https://…', onchange: e => set({ notes_link: e.target.value.trim() || null }) })),
       field('Zotero key', h('input', { type: 'text', value: t.zotero_key || '', onchange: e => set({ zotero_key: e.target.value.trim() || null }) })),
@@ -228,6 +231,7 @@ function actionBar(t, set, ctx) {
     btns.push(h('button', { onclick: () => set({ status: 'abandoned' }) }, 'Abandon'));
   }
   if (t.status === 'read' || t.status === 'abandoned') {
+    btns.push(h('button', { onclick: () => rereadDialog(t, ctx) }, 'Log a reread'));
     btns.push(h('button', { onclick: () => set({ status: 'queued' }) }, 'Return to queue'));
   }
   return h('div.actions', btns);
@@ -469,4 +473,34 @@ function numOrNull(v) {
   if (s === '') return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
+}
+
+/** The reread history, newest last. Only shown once there is one. */
+function rereadCard(t, ctx) {
+  const log = t.reread_log || [];
+  if (!log.length) return null;
+  const kindLabel = Object.fromEntries(REREAD_KINDS);
+  return h('section.card',
+    h('div.card-head',
+      h('h2', `Rereads — ${log.length}`),
+      h('button.small', { type: 'button', onclick: () => rereadDialog(t, ctx) }, 'Log another')),
+    h('ul.reread-list', log.map((e, i) => h('li',
+      h('div.reread-head',
+        h('span.tabular', e.date),
+        e.kind ? h('span.tag.soft', kindLabel[e.kind] || e.kind) : null,
+        e.hours != null ? h('span.dim.small', `${e.hours}h`) : null,
+        h('span.spacer'),
+        h('button.small.linkish', {
+          type: 'button',
+          onclick: () => {
+            if (!confirm(`Remove the reread logged on ${e.date}?`)) return;
+            mutate(d => {
+              const row = d.texts.find(x => x.id === t.id);
+              row.reread_log = (row.reread_log || []).filter((_, j) => j !== i);
+              if (!row.reread_log.length) delete row.reread_log;
+            });
+            ctx.rerender();
+          },
+        }, 'Remove')),
+      e.reason ? h('p.reread-reason', e.reason) : null))));
 }

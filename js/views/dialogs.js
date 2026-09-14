@@ -3,7 +3,7 @@
 
 import { h, mount } from '../dom.js';
 import { state, mutate, serialize, resolveConflictTakeRemote, resolveConflictForceLocal, save } from '../store.js';
-import { newText, slugify, uniqueId, todayISO, TYPES, childIndex, fold } from '../model.js';
+import { newText, slugify, uniqueId, todayISO, TYPES, childIndex, fold, REREAD_KINDS } from '../model.js';
 import { lookupPanel, lookupEnabled } from './lookup-ui.js';
 import { rowPicker } from './row-picker.js';
 import { findChapters, alreadyHave } from '../lookup.js';
@@ -542,4 +542,68 @@ export function helpDialog() {
     h('dl.keys', keys.flatMap(([k, v]) => [h('dt', h('kbd', k)), h('dd', v)])),
     h('div.actions', h('button.primary', { onclick: e => e.target.closest('dialog').destroy() }, 'Close')),
   );
+}
+
+/**
+ * Log a reread (spec §4.5).
+ *
+ * A reread is an event on a row, not a new row and not a change of status. The
+ * text stays `read`, so it never re-enters the queue and never reaches the
+ * priority sort — which is the whole point: a reread scores as canonical and
+ * cheap, and left in the sort it would recommend the same three books forever.
+ * Hours are recorded because rereading is not free, and the time budget should
+ * not pretend it is.
+ */
+export function rereadDialog(t, ctx) {
+  const date = h('input', { type: 'date', value: todayISO() });
+  const hours = h('input', { type: 'number', min: 0, step: 0.25 });
+  const kind = h('select',
+    h('option', { value: '' }, '—'),
+    REREAD_KINDS.map(([v, l]) => h('option', { value: v }, l)));
+  const reason = h('textarea', { rows: 3, placeholder: 'What you went back for, and what was different this time.' });
+  const clearWanted = h('input', { type: 'checkbox', checked: true });
+  const status = h('p.hint');
+
+  const save = () => {
+    if (!date.value) {
+      status.className = 'hint bad';
+      status.textContent = 'A reread needs a date.';
+      date.focus();
+      return;
+    }
+    // Sparse, like everything else: an unrecorded hour count is absent, not 0.
+    const entry = { date: date.value };
+    if (hours.value !== '') entry.hours = Number(hours.value);
+    if (kind.value) entry.kind = kind.value;
+    if (reason.value.trim()) entry.reason = reason.value.trim();
+    mutate(d => {
+      const row = d.texts.find(x => x.id === t.id);
+      if (!row) return;
+      row.reread_log = [...(row.reread_log || []), entry]
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      if (t.reread_wanted && clearWanted.checked) delete row.reread_wanted;
+    });
+    dlg.destroy();
+    ctx.toast(`Logged a reread of “${(t.title || '').slice(0, 40)}”.`);
+    ctx.rerender();
+  };
+
+  const form = h('form.quicklog', { onsubmit: e => { e.preventDefault(); save(); } },
+    h('h2', 'Log a reread'),
+    h('p.dim.small', t.title || '(untitled)'),
+    h('div.ql-grid',
+      qlField('Date', date, 2),
+      qlField('Hours', hours, 1),
+      qlField('Why', kind, 3),
+      qlField('Reason', reason, 6)),
+    t.reread_wanted
+      ? h('div.ql-toggles', h('label.check', clearWanted, h('span', 'Take it off the reread list')))
+      : null,
+    status,
+    h('div.actions',
+      h('button.primary', { type: 'submit' }, 'Log reread'),
+      h('button', { type: 'button', onclick: () => dlg.destroy() }, 'Cancel')),
+  );
+  const dlg = openDialog(form);
+  return dlg;
 }
