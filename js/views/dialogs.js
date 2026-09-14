@@ -534,7 +534,8 @@ export function helpDialog() {
     ['j / k', 'Move down / up the list'], ['Enter', 'Open the focused row'],
     ['1 / 2 / 0', 'Queue: mark the focused read row good / bad / unmarked'],
     ['x', 'Queue: select the focused row for a bulk action'],
-    ['1 – 5', 'Backfill: accept that match'], ['s / x / u', 'Backfill: skip / nothing to find / undo'],
+    ['1 – 5', 'Backfill: accept that match'],
+    ['1 / 2 / 3', 'Compare: left / can’t separate / right (also ← and →); s skip, u undo'], ['s / x / u', 'Backfill: skip / nothing to find / undo'],
     ['Cmd/Ctrl S', 'Save now'], ['?', 'This help'], ['Esc', 'Close'],
   ];
   return openDialog(

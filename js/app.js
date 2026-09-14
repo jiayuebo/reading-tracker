@@ -14,6 +14,7 @@ import { renderEvaluate } from './views/evaluate.js';
 import { renderSubjects, renderSubjectDetail } from './views/subjects.js';
 import { renderProjects, renderProjectDetail } from './views/projects.js';
 import { renderVerdicts } from './views/verdicts.js';
+import { renderCompare, compareKeys } from './views/compare.js';
 import { renderDetail } from './views/detail.js';
 import { renderSettings } from './views/settings.js';
 import { quickLog, newTextDialog, conflictDialog, helpDialog } from './views/dialogs.js';
@@ -101,6 +102,7 @@ function render() {
       else if (r.name === 'subjects') renderSubjects(view, ctx);
       else if (r.name === 'subject' && r.arg) renderSubjectDetail(view, ctx, r.arg);
       else if (r.name === 'verdicts') renderVerdicts(view, ctx);
+      else if (r.name === 'compare') renderCompare(view, ctx);
       else if (r.name === 'projects') renderProjects(view, ctx);
       else if (r.name === 'project' && r.arg) renderProjectDetail(view, ctx, r.arg);
       else if (r.name === 'text' && r.arg) renderDetail(view, ctx, r.arg);
@@ -298,6 +300,7 @@ function keys(e) {
   // without those becoming global shortcuts everywhere else.
   if (route().name === 'backfill' && backfillKeys(e, ctx)) return;
   if (route().name === 'queue' && queueKeys(e, ctx)) return;
+  if (route().name === 'compare' && compareKeys(e, ctx)) return;
 
   switch (e.key) {
     case 'g': pendingG = true; setTimeout(() => { pendingG = false; }, 900); break;

@@ -1,10 +1,10 @@
 // Comparison pool (spec §4).
 //
-// Built to bound a fitting budget, and RESIZED by the 2026-08-11 revision. There
-// is no Bradley-Terry fit any more: comparisons are an audit of scores that an
-// outside evaluation produced, and auditing needs a fraction of what fitting did
-// — a few dozen pairs drawn from wherever the standing scores sit closest, not
-// hundreds. So a pool of forty is generous rather than minimal.
+// Built to bound a fitting budget, resized when the 2026-08-11 revision retired
+// the fit, and given a ranking back on 2026-09-14 — this time only over texts
+// already read, where nothing is being extrapolated (see compare.js). The pool is
+// the default set compared, and a ranking takes about n·log n answers to settle,
+// so its size is once again a cost worth seeing before growing it.
 //
 // It keeps a second use that survives the revision, and may be the better one:
 // it is a standing statement of which read texts actually matter, which makes it
@@ -16,6 +16,7 @@ import { state, mutate } from '../store.js';
 import {
   poolEligible, inPool, authorLine, sortKeyTitle, matchesQuery,
 } from '../model.js';
+import { DIMENSION, fitBT, percentiles, suggestedTotal } from '../compare.js';
 
 const FILTERS = {
   all: { label: 'All eligible', test: () => true },
@@ -52,6 +53,11 @@ export function renderPool(root, ctx) {
     });
 
   const missingYear = chosen.filter(t => t.year == null);
+  const poolIds = new Set(chosen.map(t => t.id));
+  const answered = (state.doc.comparisons || []).filter(c =>
+    c.dimension === DIMENSION && poolIds.has(c.winner_id) && poolIds.has(c.loser_id));
+  const fit = fitBT(chosen.map(t => t.id), answered);
+  const positions = fit.used ? percentiles(fit) : null;
   const projectLinked = eligible.filter(t => (t.project_ids || []).length && !inPool(t));
   const dated = eligible.filter(t => t.date_finished && !inPool(t));
 
@@ -64,12 +70,11 @@ export function renderPool(root, ctx) {
     ),
 
     h('p.notice.quiet',
-      'Two uses. These are the read texts handed to an evaluation as corpus context, and the '
-      + 'pool that audit comparisons are drawn from. Auditing needs only a few dozen pairs, so '
-      + 'forty is already generous. Texts read but never confirmed from a syllabus are excluded '
+      'Two uses. These are the read texts handed to an evaluation as corpus context, and the set '
+      + 'you compare by default. Texts read but never confirmed from a syllabus are excluded '
       + 'automatically (spec §10).'),
 
-    chosen.length ? costPanel(chosen.length) : null,
+    chosen.length ? comparePanel(chosen.length, answered.length) : null,
     chosen.length ? readiness(chosen, missingYear) : null,
 
     h('div.controls',
@@ -102,19 +107,23 @@ export function renderPool(root, ctx) {
     ),
 
     shown.length
-      ? h('ul.pool-list', shown.map(t => poolRow(t)))
+      ? h('ul.pool-list', shown.map(t => poolRow(t, positions)))
       : h('div.empty', h('p', 'Nothing matches.')),
   );
 }
 
-function costPanel(n) {
+function comparePanel(n, answered) {
+  const target = suggestedTotal(n);
   return h('div.cost-panel',
-    h('p',
-      h('strong', `${n} texts`),
-      ' of corpus context, and the pool an audit draws its pairs from.'),
-    h('p.hint', 'Auditing a ranking takes far fewer comparisons than fitting one did: twenty or '
-      + 'thirty pairs will expose a systematic lean. There is no reason to grow this much beyond '
-      + 'sixty.'));
+    h('div.card-head',
+      h('p',
+        h('strong', `${n} texts`), ' · ',
+        `${answered} comparison${answered === 1 ? '' : 's'} answered`,
+        n > 1 ? ` · about ${target} to settle a ranking` : null),
+      n > 1 ? h('a.button.primary', { href: '#/compare' }, answered ? 'Keep comparing' : 'Compare') : null),
+    h('p.hint', 'Which would you more regret never having read? Asked of two texts at a time, in '
+      + 'sittings of twenty. The ranking is recomputed from your answers and never saved, and each '
+      + 'text added to the pool adds a few more to the total.'));
 }
 
 function readiness(chosen, missingYear) {
@@ -131,8 +140,9 @@ function readiness(chosen, missingYear) {
       : null);
 }
 
-function poolRow(t) {
+function poolRow(t, positions) {
   const ready = t.year != null;
+  const pos = positions && inPool(t) ? positions.get(t.id) : null;
   return h('li.pool-row',
     h('label.pool-label',
       h('input', {
@@ -147,6 +157,7 @@ function poolRow(t) {
       ),
     ),
     h('div.row-tags',
+      pos ? h('span.tag.soft.tabular', { title: `${pos.rank} of ${pos.of} by your comparisons` }, `top ${pos.top}%`) : null,
       (t.project_ids || []).length ? h('span.tag.soft', 'Project') : null,
       t.source && t.source !== 'queue' ? h('span.tag.soft', t.source) : null,
       ready ? null : h('span.tag.warn', 'no year'),
