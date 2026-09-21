@@ -15,6 +15,7 @@ import { renderSubjects, renderSubjectDetail } from './views/subjects.js';
 import { renderProjects, renderProjectDetail } from './views/projects.js';
 import { renderVerdicts } from './views/verdicts.js';
 import { renderCompare, compareKeys } from './views/compare.js';
+import { renderCourses, renderCourseDetail } from './views/courses.js';
 import { renderDetail } from './views/detail.js';
 import { renderSettings } from './views/settings.js';
 import { quickLog, newTextDialog, conflictDialog, helpDialog } from './views/dialogs.js';
@@ -105,6 +106,8 @@ function render() {
       else if (r.name === 'compare') renderCompare(view, ctx);
       else if (r.name === 'projects') renderProjects(view, ctx);
       else if (r.name === 'project' && r.arg) renderProjectDetail(view, ctx, r.arg);
+      else if (r.name === 'courses') renderCourses(view, ctx);
+      else if (r.name === 'course' && r.arg) renderCourseDetail(view, ctx, r.arg);
       else if (r.name === 'text' && r.arg) renderDetail(view, ctx, r.arg);
       else if (r.name === 'settings') renderSettings(view, ctx);
       else renderQueue(view, ctx);
@@ -118,7 +121,7 @@ function render() {
   }
 
   restoreFocus(before);
-  if (r.name === 'text' || r.name === 'triage' || r.name === 'subject' || r.name === 'project') window.scrollTo(0, scrollY);
+  if (r.name === 'text' || r.name === 'triage' || r.name === 'subject' || r.name === 'project' || r.name === 'course') window.scrollTo(0, scrollY);
   maybeOpenConflict();
 }
 
@@ -170,6 +173,7 @@ function renderNav(r) {
     navLink('#/backfill', 'Backfill', r.name === 'backfill'),
     navLink('#/subjects', 'Subjects', r.name === 'subjects' || r.name === 'subject'),
     navLink('#/projects', 'Projects', r.name === 'projects' || r.name === 'project'),
+    navLink('#/courses', 'Courses', r.name === 'courses' || r.name === 'course'),
     navLink('#/pool', 'Pool', r.name === 'pool'),
     navLink('#/evaluate', 'Evaluate', r.name === 'evaluate'),
     navLink('#/settings', 'Settings', r.name === 'settings'),
@@ -291,7 +295,7 @@ function keys(e) {
 
   if (pendingG) {
     pendingG = false;
-    const map = { q: '#/queue', t: '#/triage', s: '#/settings', b: '#/backfill', p: '#/pool', e: '#/evaluate', u: '#/subjects', l: '#/log', r: '#/projects', v: '#/verdicts' };
+    const map = { q: '#/queue', t: '#/triage', s: '#/settings', b: '#/backfill', p: '#/pool', e: '#/evaluate', u: '#/subjects', l: '#/log', r: '#/projects', v: '#/verdicts', c: '#/courses' };
     if (map[e.key]) { e.preventDefault(); location.hash = map[e.key]; }
     return;
   }

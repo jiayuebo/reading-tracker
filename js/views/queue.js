@@ -23,6 +23,7 @@ import {
 } from '../model.js';
 import { rowPicker } from './row-picker.js';
 import { rereadDialog } from './dialogs.js';
+import { dueDates, formatDay } from '../courses.js';
 
 // Checkboxes, unioned — not a dropdown of preset combinations. A dropdown made
 // "queued" and "queued + reading" look like two unrelated modes when one is a
@@ -128,6 +129,9 @@ export function renderQueue(root, ctx) {
     toggle: (id, on) => { if (on) selected.add(id); else selected.delete(id); ctx.rerender(); },
   };
 
+  // When each unread text is next due for a course session (courses.js).
+  const due = dueDates(doc);
+
   const drag = { byId, children, enabled: prefs.group !== false };
   const forest = prefs.group === false ? null : buildForest(ordered, byId, children);
   const leafCount = forest ? countLeaves(forest) : ordered.length;
@@ -173,9 +177,9 @@ export function renderQueue(root, ctx) {
 
     ordered.length
       ? (forest
-        ? h('ol.rows', { role: 'list' }, forest.map(n => renderNode(n, { cols, prefs, byId, children, drag, ctx, sel }, 0)))
+        ? h('ol.rows', { role: 'list' }, forest.map(n => renderNode(n, { cols, prefs, byId, children, drag, ctx, sel, due }, 0)))
         : h('ol.rows', { role: 'list' },
-          ordered.map(t => h('li.group', row(t, { cols, prefs, byId, children, drag, ctx, sel }, 0)))))
+          ordered.map(t => h('li.group', row(t, { cols, prefs, byId, children, drag, ctx, sel, due }, 0)))))
       : emptyState(f, statuses, inScopeTotal, ctx),
   );
 }
@@ -788,7 +792,8 @@ function unnestZone() {
   return zone;
 }
 
-function row(t, { cols, prefs, byId, children, drag, ctx, sel }, depth = 0, childCount = 0) {
+function row(t, { cols, prefs, byId, children, drag, ctx, sel, due }, depth = 0, childCount = 0) {
+  const dueFor = due && due.get(t.id);
   const s = scores(t);
   const p = priority(t, prefs.w, prefs.alpha);
   const author = authorLine(t);
@@ -831,6 +836,10 @@ function row(t, { cols, prefs, byId, children, drag, ctx, sel }, depth = 0, chil
     ),
     h('div.row-tags',
       rowActions(t, ctx),
+      dueFor
+        ? h(`span.tag.due${dueFor.past ? '.past' : ''}`, { title: `${dueFor.course}${dueFor.optional ? ' (optional)' : ''}` },
+          `${dueFor.past ? 'was due' : 'due'} ${formatDay(dueFor.date)}`)
+        : null,
       t.status === 'reading' ? h('span.tag.reading', 'Reading') : null,
       t.status === 'read' ? h('span.tag.read', 'Read') : null,
       t.status === 'abandoned' ? h('span.tag.abandoned', 'Abandoned') : null,

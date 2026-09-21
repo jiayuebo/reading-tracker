@@ -921,9 +921,15 @@ a.project-card:hover { border-color: var(--rule-2); background: var(--surface-2)
   font-family: var(--display); font-size: clamp(1.35rem, 3.2vw, 2rem); line-height: 1.2;
   color: var(--ink); margin: 0 0 1.1rem; text-wrap: balance;
 }
-.compare-cards { display: grid; grid-template-columns: 1fr auto 1fr; gap: 1rem; align-items: stretch; }
+/* minmax(0, 1fr), not 1fr: a bare 1fr column is at least as wide as its widest
+   unbreakable content, and a card's content can be long. */
+.compare-cards { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 1rem; align-items: stretch; }
 .compare-or { align-self: center; font-family: var(--display); font-style: italic; color: var(--ink-3); }
 .compare-card {
+  /* The cards are <button>s, and every button in the app is white-space: nowrap
+     so its label stays on one line. Here that laid a 350-character verdict out as
+     a single line and pushed the page off the right edge. */
+  white-space: normal; overflow-wrap: anywhere; min-width: 0;
   display: flex; flex-direction: column; gap: .45rem; text-align: left;
   padding: 1.1rem 1.2rem; min-height: 14rem;
   background: var(--surface); color: var(--ink);
@@ -957,3 +963,31 @@ a.project-card:hover { border-color: var(--rule-2); background: var(--surface-2)
   .compare-or { justify-self: center; }
   .compare-card { min-height: 0; }
 }
+
+/* ── courses ─────────────────────────────────────────────────────── */
+
+.course-list { display: flex; flex-direction: column; gap: .75rem; margin-top: .75rem; }
+a.course-card { display: block; text-decoration: none; color: inherit; }
+a.course-card:hover { border-color: var(--rule-2); background: var(--surface-2); }
+.course-legacy .actions { margin-top: .4rem; }
+.syllabus-import .steps { margin: .4rem 0 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: .8rem; }
+.syllabus-import .steps p { margin: 0 0 .3rem; }
+.review { margin-top: 1rem; padding-top: .8rem; border-top: 1px solid var(--rule); }
+.review.bad { color: var(--bad); }
+.review h3 { font-size: .74rem; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 1rem 0 .3rem; }
+.review .warnings { color: var(--warn); font-size: .88rem; }
+.fresh-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+.fresh-list li { display: flex; justify-content: space-between; gap: .8rem; align-items: baseline; flex-wrap: wrap; }
+.fresh-main { min-width: 0; }
+.fresh-list select { max-width: 22rem; }
+.sessions-preview ol { margin: 0; padding-left: 1.2rem; }
+.session-readings { list-style: none; margin: .2rem 0 .5rem; padding-left: .8rem; font-size: .9rem; }
+.session-readings li.skipped { opacity: .5; text-decoration: line-through; }
+.session-date { color: var(--ink-3); font-size: .85rem; }
+.session-list { list-style: none; margin: .5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .8rem; }
+.session { border: 1px solid var(--rule); border-radius: var(--r); padding: .55rem .7rem; background: var(--surface-2); }
+.session-head { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.session-label { flex: 1 1 14rem; min-width: 0; }
+.session-readings button.linkish.on { color: var(--accent); }
+.tag.due { background: var(--accent-soft); color: var(--accent-ink); }
+.tag.due.past { background: var(--warn-soft); color: var(--warn); }

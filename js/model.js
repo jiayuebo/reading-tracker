@@ -337,7 +337,7 @@ export function validateDoc(obj) {
   const errs = [];
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return ['Not a JSON object.'];
   if (!Array.isArray(obj.texts)) errs.push('Missing `texts` array.');
-  for (const k of ['subjects', 'projects', 'comparisons']) {
+  for (const k of ['subjects', 'projects', 'comparisons', 'courses']) {
     if (k in obj && !Array.isArray(obj[k])) errs.push(`\`${k}\` is present but not an array.`);
   }
   if (Array.isArray(obj.texts)) {
@@ -357,7 +357,7 @@ export function emptyDoc() {
   return {
     version: 1,
     updated: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-    texts: [], subjects: [], projects: [], comparisons: [], rubric: {},
+    texts: [], subjects: [], projects: [], comparisons: [], courses: [], rubric: {},
   };
 }
 
