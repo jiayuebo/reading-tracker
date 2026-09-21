@@ -430,7 +430,14 @@ export async function lookup(raw, opts = {}) {
     ...(cr.status === 'fulfilled' ? ((cr.value.message && cr.value.message.items) || []).map(fromCrossref) : []),
     ...(ol.status === 'fulfilled' ? (ol.value.docs || []).map(fromOpenLibrarySearch) : []),
   ];
-  return mergeCandidates(items).filter(c => c.title).slice(0, 6);
+  const out = mergeCandidates(items).filter(c => c.title).slice(0, 6);
+  // Say which source did not answer. An empty list because Crossref refused
+  // the request (it rate-limits, and the browser reports that as a CORS error)
+  // is not the same finding as an empty list because nothing matched.
+  const failed = [cr.status === 'rejected' ? 'Crossref' : null, ol.status === 'rejected' ? 'OpenLibrary' : null]
+    .filter(Boolean);
+  if (failed.length) out.failed = failed;
+  return out;
 }
 
 function surnames(list) {

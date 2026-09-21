@@ -2,18 +2,23 @@
 
 import { h, mount } from '../dom.js';
 import { state, mutate, savePrefs } from '../store.js';
-import { authorLine, STATUS_LABEL, byIdIndex, nextSubItemId } from '../model.js';
+import { authorLine, STATUS_LABEL, byIdIndex, nextSubItemId, TYPES } from '../model.js';
 import { rowPicker } from './row-picker.js';
+import { lookupPanel, lookupEnabled } from './lookup-ui.js';
 import {
   courseCandidates, applyCandidates, courseTextIds, buildSyllabusExport, parseSyllabus,
-  applySyllabus, formatDay, nextSession, sortSessions,
+  applySyllabus, formatDay, nextSession, sortSessions, autoMatch, fillFromCandidate, revertToAI,
 } from '../courses.js';
 
 let importOpen = false;
 let exportText = '';
 let pasteText = '';
 let parsed = null;
-let choices = new Map();
+// Lookup panels opened by hand, kept across re-renders: automatic lookups
+// re-render as each result lands, and rebuilding an open panel would throw away
+// whatever was typed into it.
+let openLookups = new Set();
+let panels = new Map();
 
 function dismissed() {
   return state.prefs.dismissedCourseKeys || [];
@@ -132,12 +137,129 @@ function importCard(ctx) {
           h('button.primary', {
             onclick: () => {
               parsed = parseSyllabus(pasteText, state.doc);
-              choices = new Map(parsed.fresh.map(f => [f.key, f.match ? f.match.id : 'create']));
+              openLookups = new Set();
+              panels = new Map();
               ctx.rerender();
+              if (!parsed.errors.length && lookupEnabled()) runLookups(parsed, ctx);
             },
           }, 'Check')))),
     parsed ? review(ctx) : null,
   );
+}
+
+/**
+ * Look up every new reading, two at a time. A result for an entry the
+ * reader has already edited is not applied over their edit.
+ */
+async function runLookups(p, ctx, only = null) {
+  const todo = (only || p.fresh).filter(f => f.include && !(f.useExisting && f.match));
+  if (!todo.length) return;
+  todo.forEach(f => { f.crossref = { status: 'looking' }; });
+  ctx.rerender();
+  let next = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const f = todo[next++];
+      const r = await autoMatch(f);
+      if (parsed !== p) return;   // checked again, or applied, meanwhile
+      if (r.status === 'matched' && !f.touched) {
+        fillFromCandidate(f, r.candidate);
+        f.crossref = { status: 'filled', source: r.candidate.source || 'Crossref', doi: r.candidate.doi || null };
+      } else if (r.status === 'matched') {
+        f.crossref = { status: 'unsure', reason: 'you edited it while it was being looked up' };
+      } else {
+        f.crossref = r;
+      }
+      ctx.rerender();
+    }
+  };
+  // Two at a time: each lookup asks Crossref and OpenLibrary, and Crossref
+  // started refusing requests in testing when pressed harder.
+  await Promise.all([worker(), worker()]);
+}
+
+function lookupNote(f) {
+  const c = f.crossref;
+  if (!c) return null;
+  const text = {
+    looking: 'Looking it up…',
+    filled: `Filled from ${c.source}${c.doi ? ` · DOI ${c.doi}` : ''}. Check it is the right work.`,
+    picked: `Filled from your choice${c.doi ? ` · DOI ${c.doi}` : ''}.`,
+    unsure: `Not filled — ${c.reason}. Look it up again to choose a record.`,
+    none: 'No catalogue record found; it will be added as typed.',
+    error: `Lookup failed: ${c.message}`,
+    reverted: 'Back to the version the chat gave.',
+  }[c.status];
+  const cls = { unsure: '.warn', error: '.bad' }[c.status] || '';
+  return text ? h(`p.hint${cls}`, text) : null;
+}
+
+/**
+ * A reading that starts out matched to an existing text, or left out, is never
+ * looked up at Check. Unticking either of those makes it a new text, and a new
+ * text is looked up then — once.
+ */
+function lookUpIfNew(f, ctx) {
+  if (!f.crossref && f.include && !(f.useExisting && f.match) && lookupEnabled()) {
+    runLookups(parsed, ctx, [f]);
+  }
+}
+
+function freshRow(f, i, ctx) {
+  const id = k => `sy-${i}-${k}`;
+  const using = f.include && f.useExisting && f.match;
+  const edit = (k, parse) => (e) => { f[k] = parse(e.target.value); f.touched = true; ctx.rerender(); };
+  const lookupOpen = openLookups.has(f.key);
+
+  return h(`li.fresh-item${f.include ? '' : '.excluded'}`,
+    h('div.fresh-head',
+      h('label.check',
+        h('input', { type: 'checkbox', checked: f.include, onchange: e => { f.include = e.target.checked; ctx.rerender(); lookUpIfNew(f, ctx); } }),
+        h('span', 'Add')),
+      h('strong.fresh-title', f.title),
+      f.sessions > 1 ? h('span.dim.small', ` · in ${f.sessions} sessions`) : null),
+    f.include && f.match ? h('label.check.fresh-existing',
+      h('input', { type: 'checkbox', checked: !!f.useExisting, onchange: e => { f.useExisting = e.target.checked; ctx.rerender(); lookUpIfNew(f, ctx); } }),
+      h('span', 'Use the text you already have: ', h('em', f.match.title),
+        (f.match.authors || []).length ? ` — ${authorLine(f.match)}` : '')) : null,
+    f.include && !using ? h('div.fresh-edit',
+      h('div.bib-row',
+        field('Title', h('input', { id: id('title'), type: 'text', value: f.title, onchange: edit('title', v => v.trim() || f.title) }), 5),
+        field('Authors', h('input', {
+          id: id('authors'), type: 'text', value: f.authors.join('; '), placeholder: 'Separated by semicolons',
+          onchange: edit('authors', v => v.split(';').map(x => x.trim()).filter(Boolean)),
+        }), 3),
+        field('Year', h('input', { id: id('year'), type: 'number', value: f.year ?? '', onchange: edit('year', v => (v ? Number(v) : null)) }), 1),
+        field('Type', h('select', { id: id('type'), onchange: edit('type', v => v) },
+          TYPES.map(t => h('option', { value: t, selected: f.type === t }, t))), 2),
+        field('Pages', h('input', { id: id('pages'), type: 'number', value: f.pages ?? '', onchange: edit('pages', v => (v ? Number(v) : null)) }), 1)),
+      lookupNote(f),
+      lookupEnabled() ? h('div.actions',
+        h('button.small', {
+          type: 'button',
+          onclick: () => {
+            if (lookupOpen) { openLookups.delete(f.key); panels.delete(f.key); } else openLookups.add(f.key);
+            ctx.rerender();
+          },
+        }, lookupOpen ? 'Close lookup' : 'Look up again'),
+        f.ai ? h('button.small.linkish', {
+          type: 'button',
+          onclick: () => { revertToAI(f); f.crossref = { status: 'reverted' }; ctx.rerender(); },
+        }, 'Undo the lookup') : null) : null,
+      lookupOpen ? panelFor(f, ctx) : null) : null);
+}
+
+function panelFor(f, ctx) {
+  if (!panels.has(f.key)) {
+    panels.set(f.key, lookupPanel((c) => {
+      fillFromCandidate(f, c);
+      f.crossref = { status: 'picked', doi: c.doi || null };
+      openLookups.delete(f.key);
+      panels.delete(f.key);
+      ctx.rerender();
+    }, { compareTo: f, initial: f.title }));
+  }
+  return panels.get(f.key);
 }
 
 function review(ctx) {
@@ -153,8 +275,10 @@ function review(ctx) {
       warnings.length ? h('ul.dim', warnings.map(w => h('li', w))) : null);
   }
 
-  const toCreate = fresh.filter(f => choices.get(f.key) === 'create').length;
-  const toLink = fresh.filter(f => { const c = choices.get(f.key); return c && c !== 'create' && c !== 'skip'; }).length;
+  const outcome = f => (!f.include ? 'skip' : (f.useExisting && f.match ? f.match.id : 'create'));
+  const toCreate = fresh.filter(f => outcome(f) === 'create').length;
+  const toLink = fresh.filter(f => !['create', 'skip'].includes(outcome(f))).length;
+  const pending = fresh.filter(f => f.crossref && f.crossref.status === 'looking').length;
 
   return h('div.review',
     h('p', existingCourse
@@ -164,48 +288,51 @@ function review(ctx) {
 
     fresh.length ? h('div.fresh',
       h('h3', `${fresh.length} reading${fresh.length === 1 ? '' : 's'} not matched to your tracker`),
-      h('p.hint', 'Created as queued coursework unless you change it. Where one looks like a text you already have, that text is chosen instead.'),
-      h('ul.fresh-list', fresh.map(f => h('li',
-        h('div.fresh-main',
-          h('strong', f.title),
-          h('span.dim.small', ` — ${[f.authors.join(', '), f.year, f.type !== 'article' ? f.type : null].filter(Boolean).join(' · ')}`),
-          f.sessions > 1 ? h('span.dim.small', ` · in ${f.sessions} sessions`) : null),
-        h('select', {
-          'aria-label': `What to do with ${f.title}`,
-          onchange: e => { choices.set(f.key, e.target.value); ctx.rerender(); },
-        },
-          h('option', { value: 'create', selected: choices.get(f.key) === 'create' }, 'Create it'),
-          f.match ? h('option', { value: f.match.id, selected: choices.get(f.key) === f.match.id }, `Use existing: ${f.match.title}`) : null,
-          h('option', { value: 'skip', selected: choices.get(f.key) === 'skip' }, 'Leave it out')))))) : null,
+      h('p.hint', 'Ticked ones are added as queued coursework. Every field can be corrected here; nothing is saved until you apply.'),
+      h('ol.fresh-list', fresh.map((f, i) => freshRow(f, i, ctx)))) : null,
 
     h('div.sessions-preview',
       h('h3', `${sessions.length} session${sessions.length === 1 ? '' : 's'}`),
-      h('ol', sessions.map(s => h('li',
-        h('span.session-date.tabular', s.date ? formatDay(s.date) : 'no date'),
-        h('span', ` ${s.label}`),
-        h('ul.session-readings', s.items.map(it => {
+      h('ol.session-list', sessions.map((s, si) => h('li.session',
+        h('div.session-head',
+          h('input', {
+            id: `sy-s${si}-date`, type: 'date', value: s.date || '', 'aria-label': 'Session date',
+            onchange: e => { s.date = e.target.value || null; ctx.rerender(); },
+          }),
+          h('input.session-label', {
+            id: `sy-s${si}-label`, type: 'text', value: s.label, 'aria-label': 'Session label',
+            onchange: e => { s.label = e.target.value.trim() || s.label; ctx.rerender(); },
+          })),
+        h('ul.session-readings', s.items.map((it) => {
+          let title; let note;
           if (it.kind === 'existing') {
-            const t = byId.get(it.id);
-            return h('li', t.title, h('span.dim.small', ' — already tracked'), it.optional ? h('span.tag.soft', 'optional') : null);
+            title = byId.get(it.id).title; note = ' — already tracked';
+          } else {
+            const f = freshByKey.get(it.key);
+            const o = outcome(f);
+            title = o === 'create' || o === 'skip' ? f.title : f.match.title;
+            note = o === 'create' ? ' — new' : o === 'skip' ? ' — left out' : ' — already tracked';
           }
-          const f = freshByKey.get(it.key);
-          const c = choices.get(it.key);
-          return h(`li${c === 'skip' ? '.skipped' : ''}`, f.title,
-            h('span.dim.small', c === 'create' ? ' — new' : c === 'skip' ? ' — left out' : ' — existing'),
-            it.optional ? h('span.tag.soft', 'optional') : null);
+          const skipped = note === ' — left out';
+          return h(`li${skipped ? '.skipped' : ''}`, title, h('span.dim.small', note),
+            skipped ? null : h('label.check.small.inline-opt',
+              h('input', { type: 'checkbox', checked: !!it.optional, onchange: e => { it.optional = e.target.checked; } }),
+              h('span', 'optional')));
         })))))),
 
     h('div.actions',
       h('button.primary', {
         onclick: () => {
+          const choice = new Map(fresh.map(f => [f.key, outcome(f)]));
           let result = null;
-          mutate(d => { result = applySyllabus(d, parsed, choices); });
-          importOpen = false; parsed = null; pasteText = '';
+          mutate(d => { result = applySyllabus(d, parsed, choice); });
+          importOpen = false; parsed = null; pasteText = ''; openLookups = new Set(); panels = new Map();
           ctx.toast(`${result.isNew ? 'Created' : 'Updated'} the course: ${result.linked} readings linked`
             + (result.created ? `, ${result.created} new texts queued` : '') + '.');
           ctx.go(`#/course/${encodeURIComponent(result.courseId)}`);
         },
-      }, `Apply — ${sessions.length} sessions${toCreate ? `, ${toCreate} new texts` : ''}${toLink ? `, ${toLink} matched` : ''}`)),
+      }, `Apply — ${sessions.length} sessions${toCreate ? `, ${toCreate} new texts` : ''}${toLink ? `, ${toLink} matched` : ''}`),
+      pending ? h('span.dim.small', `Still looking up ${pending}; applying now adds those as typed.`) : null),
   );
 }
 

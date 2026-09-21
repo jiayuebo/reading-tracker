@@ -991,3 +991,23 @@ a.course-card:hover { border-color: var(--rule-2); background: var(--surface-2);
 .session-readings button.linkish.on { color: var(--accent); }
 .tag.due { background: var(--accent-soft); color: var(--accent-ink); }
 .tag.due.past { background: var(--warn-soft); color: var(--warn); }
+
+/* ── syllabus review ─────────────────────────────────────────────── */
+
+/* The 12-column rows only ever defined spans 1–4, so the course page's
+   six-column Name field (and anything wider) fell back to one column. */
+.gf-5 { grid-column: span 5; }
+.gf-6 { grid-column: span 6; }
+
+.fresh-list { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .7rem; }
+.fresh-item { border: 1px solid var(--rule); border-radius: var(--r); padding: .55rem .7rem; background: var(--surface-2); }
+.fresh-item.excluded { opacity: .6; }
+.fresh-item.excluded .fresh-title { text-decoration: line-through; }
+.fresh-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+.fresh-existing { display: flex; gap: .4rem; margin: .35rem 0 0 1.6rem; font-size: .88rem; }
+.fresh-edit { margin: .5rem 0 0 1.6rem; }
+.fresh-edit .actions { margin-top: .3rem; }
+.fresh-edit .lookup { margin-top: .4rem; }
+.inline-opt { display: inline-flex; gap: .25rem; margin-left: .6rem; font-size: .78rem; color: var(--ink-3); }
+.sessions-preview .session-list { margin-top: .4rem; }
+@media (max-width: 720px) { .gf-5, .gf-6 { grid-column: span 4; } .fresh-edit, .fresh-existing { margin-left: 0; } }

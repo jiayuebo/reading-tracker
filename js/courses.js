@@ -14,6 +14,7 @@
 import {
   fold, slugify, uniqueId, todayISO, authorLine, TYPES, nextSubItemId, newText,
 } from './model.js';
+import { lookup, rankCandidates, authorsAgree } from './lookup.js';
 
 // ── dates ───────────────────────────────────────────────────────────
 
@@ -328,8 +329,15 @@ export function parseSyllabus(text, doc) {
           parent = null;
         }
         const year = Number.isInteger(Number(n.year)) && Number(n.year) > 0 ? Number(n.year) : null;
-        const entry = { key, title, authors, year, type, parent_id: parent, sessions: 0 };
+        // Everything below `sessions` is editable in the review before anything
+        // is written; `ai` keeps the chat's version once Crossref overwrites it.
+        const entry = {
+          key, title, authors, year, type, parent_id: parent, sessions: 0,
+          pages: null, doi: null, isbn: null, journal: null, container: null,
+          include: true, crossref: null, ai: null, touched: false,
+        };
         entry.match = probableMatch(entry, texts);
+        entry.useExisting = !!entry.match;
         fresh.set(key, entry);
       }
       fresh.get(key).sessions += 1;
@@ -376,10 +384,14 @@ export function applySyllabus(d, parsed, choice) {
     // Source `coursework` because an instructor chose it, which is a selection
     // process of its own (§3). No `confidence: syllabus` — that flag exists to
     // keep unconfirmed *read* rows out of the corpus, and these are not read.
+    const extra = {};
+    for (const k of ['pages', 'doi', 'isbn', 'journal']) if (f[k] != null && f[k] !== '') extra[k] = f[k];
     const row = newText({
       id, title: f.title, authors: f.authors, year: f.year, type: f.type,
       parent_id: f.parent_id, status: 'queued', source: 'coursework',
-      date_added: todayISO(), source_notes: 'syllabus-import',
+      // A linked parent wins over a named one (§3), so never store both.
+      container: f.parent_id ? null : (f.container || null),
+      date_added: todayISO(), source_notes: 'syllabus-import', extra,
     });
     row.import.courses = [course.id];
     d.texts.push(row);
@@ -407,4 +419,74 @@ export function applySyllabus(d, parsed, choice) {
   }
   course.sessions = sortSessions(course.sessions);
   return { courseId: course.id, isNew, created, linked };
+}
+
+// ── syllabus: catalogue lookup ──────────────────────────────────────
+//
+// Each new reading is looked up when the paste is checked, and can be looked up
+// again by hand. §10 warns that a title search is not proof of identity: search
+// a book's title and Crossref's top hit can be a review of it, same title,
+// different author. So a result fills an entry only when it has authors, they
+// agree with the syllabus's, and the titles match; anything else is left as
+// the chat gave it and marked for a look. Nothing reaches the file until Apply,
+// and the review is the human look §10 asks for.
+
+function titleClose(a, b) {
+  const x = fold(a);
+  const y = fold(b);
+  if (!x || !y) return false;
+  if (x === y || x.startsWith(y) || y.startsWith(x)) return true;
+  return (x.includes(y) || y.includes(x)) && Math.min(x.length, y.length) >= 12;
+}
+
+export async function autoMatch(f) {
+  if (!f.authors.length) {
+    return { status: 'unsure', reason: 'the syllabus gives no author to check a match against' };
+  }
+  let found;
+  try {
+    found = await lookup(f.title, { author: f.authors[0] });
+    // An empty answer for a well-known paper turned out to be transient in
+    // testing — "Two Dogmas of Empiricism" came back with nothing once and with
+    // five records a moment later. One retry before calling it absent.
+    if (!found.length) {
+      await new Promise(r => setTimeout(r, 900));
+      found = await lookup(f.title, { author: f.authors[0] });
+    }
+  } catch (e) {
+    return { status: 'error', message: e.message };
+  }
+  if (!found.length) {
+    return found.failed
+      ? { status: 'error', message: `${found.failed.join(' and ')} did not answer — usually a rate limit. Look it up again in a moment.` }
+      : { status: 'none' };
+  }
+  const top = rankCandidates(found, f)[0];
+  if ((top.authors || []).length && authorsAgree(f, top) && titleClose(f.title, top.title)) {
+    return { status: 'matched', candidate: top };
+  }
+  return {
+    status: 'unsure',
+    reason: (top.authors || []).length && !authorsAgree(f, top)
+      ? `the closest record is by ${top.authors.slice(0, 2).join(' & ')}`
+      : 'the closest record has a different title',
+  };
+}
+
+/** Overwrite an entry from a catalogue record, keeping the chat's version to undo to. */
+export function fillFromCandidate(f, c) {
+  if (!f.ai) f.ai = { title: f.title, authors: [...f.authors], year: f.year, type: f.type, pages: f.pages };
+  if (c.title) f.title = c.title;
+  if ((c.authors || []).length) f.authors = [...c.authors];
+  if (c.year) f.year = c.year;
+  // A reading the chat nested under a book keeps its type; a title search on a
+  // chapter can surface the whole book.
+  if (c.type && TYPES.includes(c.type) && !f.parent_id) f.type = c.type;
+  for (const k of ['pages', 'doi', 'isbn', 'journal', 'container']) f[k] = c[k] ?? null;
+}
+
+export function revertToAI(f) {
+  if (!f.ai) return;
+  Object.assign(f, f.ai, { doi: null, isbn: null, journal: null, container: null });
+  f.ai = null;
 }

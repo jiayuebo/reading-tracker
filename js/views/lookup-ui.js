@@ -27,6 +27,9 @@ export function lookupPanel(onPick, opts = {}) {
   const input = h('input.lookup-input', {
     type: 'text',
     placeholder: opts.placeholder || 'DOI, ISBN, JSTOR link, or title…',
+    // Pre-filled when there is already a title to search for — the syllabus
+    // review opens this on an entry that has one.
+    value: opts.initial || '',
     'aria-label': 'DOI, ISBN, or title to look up',
     onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); go(); } },
   });
