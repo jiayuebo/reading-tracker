@@ -497,7 +497,6 @@ function matches(t, f, byId) {
       t.container,
       containerName(t, byId),
       t.journal,
-      (t.shelves || []).join(' '),
       (t.import || {}).raw_title,
       (t.import || {}).also_known_as,
       t.year,
@@ -849,7 +848,6 @@ function row(t, { cols, prefs, byId, children, drag, ctx, sel, due }, depth = 0,
         t.carded ? h('span.tag.soft', 'Cards') : null,
       ],
       (t.project_ids || []).length ? h('span.tag.soft', 'Project') : null,
-      (t.shelves || []).map(sh => h('span.tag.soft', { title: sh }, sh.length > 22 ? sh.slice(0, 21) + '…' : sh)),
       blocked.length
         ? h('span.tag.warn', { title: blocked.map(x => x.title).join('; ') },
           `${blocked.length} prerequisite${blocked.length === 1 ? '' : 's'} unread`)

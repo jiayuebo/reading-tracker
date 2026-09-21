@@ -84,15 +84,7 @@ export function sortSessions(sessions) {
     .map(x => x.s);
 }
 
-// ── the six 2025–26 courses ─────────────────────────────────────────
-
-/** Course keys found on texts' `import.courses` that have no record yet. */
-export function legacyCourseKeys(doc, dismissed = []) {
-  const recorded = new Set((doc.courses || []).map(c => c.id));
-  const keys = new Set();
-  for (const t of doc.texts || []) for (const k of (t.import || {}).courses || []) keys.add(k);
-  return [...keys].filter(k => !recorded.has(k) && !dismissed.includes(k)).sort();
-}
+// ── courses implied by older data ───────────────────────────────────
 
 /** "ethics-of-belief-246" → "Ethics of belief 246". A starting name, meant to be edited. */
 export function nameFromKey(key) {
@@ -102,19 +94,66 @@ export function nameFromKey(key) {
   return out.charAt(0).toUpperCase() + out.slice(1);
 }
 
-export function recordsFromTags(doc, keys) {
-  return keys.map(key => ({
-    id: key,
-    name: nameFromKey(key),
+/** "Readings for Tyler's seminar on Kant" → "Tyler's seminar on Kant". */
+export function nameFromShelf(shelf) {
+  const out = String(shelf).trim().replace(/^readings?\s+(for|from)\s+/i, '');
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}
+
+/**
+ * Courses implied by older data that have no record yet.
+ *
+ * Two earlier representations. The `import.courses` tag from the 2025–26
+ * syllabus merge stays on each text as provenance. `shelves` is retired (§3):
+ * the only shelf ever used was a seminar's reading list, which is what a course
+ * is, so turning one into a course also removes the label — see applyCandidates.
+ * Either way the reader creates the records with one click; nothing is inferred
+ * silently.
+ */
+export function courseCandidates(doc, dismissed = []) {
+  const recorded = new Set((doc.courses || []).map(c => c.id));
+  const found = new Map();
+  const add = (key, make, textId) => {
+    if (!found.has(key)) found.set(key, { key, ...make(), text_ids: [] });
+    const c = found.get(key);
+    if (!c.text_ids.includes(textId)) c.text_ids.push(textId);
+  };
+  for (const t of doc.texts || []) {
+    for (const k of (t.import || {}).courses || []) {
+      add(k, () => ({ name: nameFromKey(k), source: 'tag' }), t.id);
+    }
+    for (const sh of t.shelves || []) {
+      add(slugify(nameFromShelf(sh)), () => ({ name: nameFromShelf(sh), source: 'shelf', shelf: sh }), t.id);
+    }
+  }
+  return [...found.values()]
+    .filter(c => !recorded.has(c.key) && !dismissed.includes(c.key))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Create the records, inside mutate(). A course made from a shelf takes the
+ * shelf's place: the label comes off its readings, and the `shelves` key goes
+ * once it is empty, so the same grouping is never stored twice.
+ */
+export function applyCandidates(d, candidates) {
+  d.courses = [...(d.courses || []), ...recordsFromCandidates(candidates)];
+  const retired = new Set(candidates.filter(c => c.source === 'shelf').map(c => c.shelf));
+  if (!retired.size) return;
+  for (const t of d.texts || []) {
+    if (!(t.shelves || []).length) continue;
+    t.shelves = t.shelves.filter(sh => !retired.has(sh));
+    if (!t.shelves.length) delete t.shelves;
+  }
+}
+
+export function recordsFromCandidates(candidates) {
+  return candidates.map(c => ({
+    id: c.key,
+    name: c.name,
     code: null,
     term: null,
-    sessions: [{
-      id: 's1',
-      date: null,
-      label: 'Readings',
-      text_ids: (doc.texts || []).filter(t => ((t.import || {}).courses || []).includes(key)).map(t => t.id),
-      optional_ids: [],
-    }],
+    sessions: [{ id: 's1', date: null, label: 'Readings', text_ids: [...c.text_ids], optional_ids: [] }],
   }));
 }
 

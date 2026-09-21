@@ -5,7 +5,7 @@ import { state, mutate, savePrefs } from '../store.js';
 import { authorLine, STATUS_LABEL, byIdIndex, nextSubItemId } from '../model.js';
 import { rowPicker } from './row-picker.js';
 import {
-  legacyCourseKeys, recordsFromTags, courseTextIds, buildSyllabusExport, parseSyllabus,
+  courseCandidates, applyCandidates, courseTextIds, buildSyllabusExport, parseSyllabus,
   applySyllabus, formatDay, nextSession, sortSessions,
 } from '../courses.js';
 
@@ -39,7 +39,7 @@ export function renderCourses(root, ctx) {
   const doc = state.doc;
   const courses = doc.courses || [];
   const byId = byIdIndex(doc.texts || []);
-  const legacy = legacyCourseKeys(doc, dismissed());
+  const legacy = courseCandidates(doc, dismissed());
   const upcoming = courses.filter(c => nextSession(c)).length;
 
   mount(root,
@@ -51,17 +51,23 @@ export function renderCourses(root, ctx) {
         : 'none recorded yet')),
 
     legacy.length ? h('div.notice.quiet.course-legacy',
-      h('p', `${legacy.length} course${legacy.length === 1 ? '' : 's'} from your 2025–26 syllabi `
-        + 'are tagged on readings but have no record: ', h('span.dim', legacy.join(', ')), '.'),
+      h('p', `${legacy.length} course${legacy.length === 1 ? ' is' : 's are'} implied by your readings `
+        + 'but not recorded:'),
+      h('ul', legacy.map(c => h('li',
+        h('strong', c.name),
+        h('span.dim', ` — ${c.text_ids.length} reading${c.text_ids.length === 1 ? '' : 's'}, `
+          + (c.source === 'shelf'
+            ? `from the shelf “${c.shelf}”, which is removed once the course exists`
+            : 'from the 2025–26 syllabus tags'))))),
       h('div.actions',
         h('button.primary', {
           onclick: () => {
-            mutate(d => { d.courses = [...(d.courses || []), ...recordsFromTags(d, legacy)]; });
-            ctx.toast(`Created ${legacy.length} course records. Rename them as you like.`);
+            mutate(d => { applyCandidates(d, legacy); });
+            ctx.toast(`Created ${legacy.length} course record${legacy.length === 1 ? '' : 's'}. Rename as you like.`);
           },
-        }, `Create ${legacy.length} records`),
+        }, `Create ${legacy.length} record${legacy.length === 1 ? '' : 's'}`),
         h('button', {
-          onclick: () => savePrefs({ dismissedCourseKeys: [...dismissed(), ...legacy] }),
+          onclick: () => savePrefs({ dismissedCourseKeys: [...dismissed(), ...legacy.map(c => c.key)] }),
         }, 'Not now'))) : null,
 
     importCard(ctx),
@@ -252,7 +258,7 @@ export function renderCourseDetail(root, ctx, id) {
           if (!confirm(`Delete the course “${c.name}”?\n\nIts ${ids.length} readings stay in the tracker; only the course record and its dates go.`)) return;
           mutate(d => { d.courses = (d.courses || []).filter(x => x.id !== id); });
           // A course made from the 2025–26 tags would otherwise be offered again.
-          if (texts.some(t => ((t.import || {}).courses || []).includes(id))) savePrefs({ dismissedCourseKeys: [...dismissed(), id] });
+          savePrefs({ dismissedCourseKeys: [...new Set([...dismissed(), id])] });
           ctx.go('#/courses');
         },
       }, 'Delete this course')),
